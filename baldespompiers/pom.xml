@@ -47,6 +47,10 @@
 	<properties>
 		<java.version>21</java.version>
 	</properties>
+
+
+
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -70,6 +74,24 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
+		<!-- https://gitlab.com/js-project-gis-1/js-fire-simulator-public/-/blob/master/pom.xml?ref_type=heads  -->
+		<dependency>
+			<groupId>org.geotools</groupId>
+			<artifactId>gt-shapefile</artifactId>
+			<version>26-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.geotools</groupId>
+			<artifactId>gt-swing</artifactId>
+			<version>26-SNAPSHOT</version>
+		</dependency>
+		<dependency>
+			<groupId>org.geotools</groupId>
+			<artifactId>gt-epsg-hsql</artifactId>
+			<version>26-SNAPSHOT</version>
+		</dependency>
+        <!-- _____________________________________________________________________________________ -->
+
 	</dependencies>
 
 	<build>

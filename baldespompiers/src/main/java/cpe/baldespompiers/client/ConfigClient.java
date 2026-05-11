@@ -1,5 +1,5 @@
 package cpe.baldespompiers.client;
-
+// pas utile pour nous ? pour le prof ?
 
 /**
  * Client regroupant les configs simulateur secondaires.

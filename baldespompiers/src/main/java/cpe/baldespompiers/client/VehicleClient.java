@@ -14,5 +14,91 @@ package cpe.baldespompiers.client;
  *   DELETE /vehicle/{teamuuid}/{id}        → supprimer un véhicule
  *   DELETE /vehicle/{teamuuid}             → supprimer tous les véhicules de l'équipe
  */
+
+@Component
 public class VehicleClient {
+
+    private final WebClient webClient;
+    private final JwtAuthClient jwtAuthClient;
+
+    public VehicleClient(WebClient simulatorWebClient, JwtAuthClient jwtAuthClient) {
+        this.webClient = simulatorWebClient;
+        this.jwtAuthClient = jwtAuthClient;
+    }
+
+    public List<VehicleDto> getAllVehicles() {
+        return webClient.get()
+                .uri("/vehicles")
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<VehicleDto>>() {})
+                .block();
+    }
+
+    public List<VehicleDto> getVehiclesByTeam(String teamUuid) {
+        return webClient.get()
+                .uri("/vehiclebyteam/{teamuuid}", teamUuid)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<VehicleDto>>() {})
+                .block();
+    }
+
+    public VehicleDto getVehicleById(String id) {
+        return webClient.get()
+                .uri("/vehicle/{id}", id)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
+    public VehicleDto addVehicle(String teamUuid, VehicleDto dto) {
+        return webClient.post()
+                .uri("/vehicle/{teamuuid}", teamUuid)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .bodyValue(dto)
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
+    public VehicleDto updateVehicle(String teamUuid, String vehicleId, VehicleDto dto) {
+        return webClient.put()
+                .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .bodyValue(dto)
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
+    /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */
+    public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
+        return webClient.put()
+                .uri("/vehicle/move/{teamuuid}/{id}", teamUuid, vehicleId)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .bodyValue(destination)
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
+    public Boolean deleteVehicle(String teamUuid, String vehicleId) {
+        return webClient.delete()
+                .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(Boolean.class)
+                .block();
+    }
+
+    public Boolean deleteAllVehiclesByTeam(String teamUuid) {
+        return webClient.delete()
+                .uri("/vehicle/{teamuuid}", teamUuid)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(Boolean.class)
+                .block();
+    }
 }

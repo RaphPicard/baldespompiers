@@ -14,5 +14,69 @@ package cpe.baldespompiers.client;
  */
 
 
+@Component
 public class RpEventClient {
+
+    private final WebClient webClient;
+    private final JwtAuthClient jwtAuthClient;
+
+    public RpEventClient(WebClient simulatorWebClient, JwtAuthClient jwtAuthClient) {
+        this.webClient = simulatorWebClient;
+        this.jwtAuthClient = jwtAuthClient;
+    }
+
+    public List<EmergencyEventDto> getAllEvents() {
+        return webClient.get()
+                .uri("/rpevent")
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<EmergencyEventDto>>() {})
+                .block();
+    }
+
+    public EmergencyEventDto getEventById(int id) {
+        return webClient.get()
+                .uri("/rpevent/{id}", id)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(EmergencyEventDto.class)
+                .block();
+    }
+
+    public void deleteEventById(int id) {
+        webClient.delete()
+                .uri("/rpevent/{id}", id)
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(Void.class)
+                .block();
+    }
+
+    public void deleteAllEvents() {
+        webClient.delete()
+                .uri("/rpevent/all")
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(Void.class)
+                .block();
+    }
+
+    public Object getCreationConfig() {
+        return webClient.get()
+                .uri("/rpevent/config/creation")
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .retrieve()
+                .bodyToMono(Object.class)
+                .block();
+    }
+
+    public void setCreationConfig(Object config) {
+        webClient.put()
+                .uri("/rpevent/config/creation")
+                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .bodyValue(config)
+                .retrieve()
+                .bodyToMono(Void.class)
+                .block();
+    }
 }

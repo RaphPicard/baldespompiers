@@ -227,3 +227,20 @@ cpefighter/
 - Lib externe (DTOs/Enums) : `https://gitlab.com/js-project-gis-1/js-fire-simulator-public`
 - Leaflet docs : `https://leafletjs.com/`
 - Mapbox (routage) : `https://docs.mapbox.com/api/navigation/directions/`
+
+
+
+---
+---
+
+# UPDATE DE L'AVANCEMENT (11 mai)
+- Création architecture + README
+- Setup Maven et Spring Boot (pas fini)
+- Implémentation des clients les plus faciles
+
+# TODO : 
+- Implémenter Auth + JWT + session !!!
+- Finir les clients
+- Finir les controllers
+- Finir les services
+- Faire les 3 configs

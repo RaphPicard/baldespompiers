@@ -1,7 +1,6 @@
 package cpe.baldespompiers.model.dto;
 
-import com.project.model.type.EmergencyType;
-import org.locationtech.jts.geom.Point;
+import cpe.baldespompiers.model.type.EmergencyType;
 import java.util.ArrayList;
 import java.util.List;
 

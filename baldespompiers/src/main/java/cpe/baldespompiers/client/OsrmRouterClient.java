@@ -1,5 +1,7 @@
 package cpe.baldespompiers.client;
 
+import org.springframework.beans.factory.annotation.Value;
+
 /**
  * Calcule des itinéraires réels via l'API publique OSRM.
  * Retourne la liste ordonnée de waypoints à suivre.
@@ -8,6 +10,6 @@ package cpe.baldespompiers.client;
 
 public class OsrmRouterClient {
 
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 }

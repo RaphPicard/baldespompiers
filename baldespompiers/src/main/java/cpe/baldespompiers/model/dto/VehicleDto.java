@@ -1,7 +1,7 @@
 package cpe.baldespompiers.model.dto;
 
-import com.project.model.type.LiquidType;
-import com.project.model.type.VehicleType;
+import cpe.baldespompiers.model.type.LiquidType;
+import cpe.baldespompiers.model.type.VehicleType;
 
 import java.util.ArrayList;
 import java.util.List;

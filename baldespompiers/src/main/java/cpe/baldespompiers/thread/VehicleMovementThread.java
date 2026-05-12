@@ -8,7 +8,14 @@ import com.project.model.dto.FireDto;
 import com.project.model.dto.VehicleDto;
 import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.client.FireClient;
+import cpe.baldespompiers.client.FacilityClient;
+import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.service.EmergencyManagerService;
+import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.FacilityDto;
+import cpe.baldespompiers.model.dto.FireDto;
+import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
@@ -46,15 +53,12 @@ public class VehicleMovementThread {
     @Value("${movement.mode:teleport}")
     private String movementMode;
 
-    // Taille d'un step en degrés (~200m selon latitude Lyon)
     @Value("${movement.step.size:0.002}")
     private double stepSize;
 
-    // Délai entre deux steps en ms
     @Value("${movement.step.delay.ms:500}")
     private long stepDelayMs;
 
-    // Délai entre deux checks d'intensité du feu en ms
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
@@ -79,9 +83,6 @@ public class VehicleMovementThread {
             emergencyManagerService.getVehicleStates()
                     .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
 
-            System.out.println("[Move] Véhicule " + vehicle.getId()
-                    + " arrivé sur feu " + fire.getId() + ", intervention...");
-
             waitForFireOut(fire.getId());
 
             // Phase 3 : retour à la caserne
@@ -89,13 +90,9 @@ public class VehicleMovementThread {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            System.err.println("[Move] Thread interrompu pour véhicule " + vehicle.getId());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
         } finally {
             // Phase 4 : libération dans tous les cas
             if (onDone != null) onDone.run();
-            System.out.println("[Move] Véhicule " + vehicle.getId() + " libéré.");
         }
     }
 
@@ -266,7 +263,7 @@ public class VehicleMovementThread {
     private void returnToFacility(VehicleDto vehicle) throws InterruptedException, IOException {
         if (vehicle.getFacilityRefID() == null) return;
 
-        FacilityDto facility = facilityClient.getFacilityById(vehicle.getFacilityRefID());
+        FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
 
         movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), fire);

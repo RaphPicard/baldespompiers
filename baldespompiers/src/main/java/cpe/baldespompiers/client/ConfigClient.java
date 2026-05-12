@@ -1,6 +1,8 @@
 package cpe.baldespompiers.client;
 // pas utile pour nous ? pour le prof ?
 
+import org.springframework.beans.factory.annotation.Value;
+
 /**
  * Client regroupant les configs simulateur secondaires.
  *
@@ -16,6 +18,6 @@ package cpe.baldespompiers.client;
  */
 
 public class ConfigClient {
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 }

@@ -8,6 +8,7 @@ import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.FacilityDto;
+import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;

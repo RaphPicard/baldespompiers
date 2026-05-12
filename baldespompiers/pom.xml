@@ -90,6 +90,19 @@
 			<artifactId>gt-swing</artifactId>
 			<version>26-SNAPSHOT</version>
 		</dependency>
+
+			<!-- Spring MVC classique -->
+			<dependency>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-starter-web</artifactId>
+			</dependency>
+
+			<!-- WebClient -->
+			<dependency>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-starter-webflux</artifactId>
+			</dependency>
+
 		<dependency>
 			<groupId>org.geotools</groupId>
 			<artifactId>gt-epsg-hsql</artifactId>

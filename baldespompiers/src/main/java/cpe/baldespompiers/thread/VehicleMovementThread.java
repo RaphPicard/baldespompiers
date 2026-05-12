@@ -2,20 +2,14 @@ package cpe.baldespompiers.thread;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.project.model.dto.Coord;
-import com.project.model.dto.FacilityDto;
 import com.project.model.dto.FireDto;
 import com.project.model.dto.VehicleDto;
 import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.client.FireClient;
-import cpe.baldespompiers.client.FacilityClient;
-import cpe.baldespompiers.client.FireClient;
+
 import cpe.baldespompiers.client.VehicleClient;
-import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.FacilityDto;
-import cpe.baldespompiers.model.dto.FireDto;
-import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
@@ -88,7 +82,7 @@ public class VehicleMovementThread {
             // Phase 3 : retour à la caserne
             returnToFacility(vehicle);
 
-        } catch (InterruptedException e) {
+        } catch (InterruptedException | IOException e) {
             Thread.currentThread().interrupt();
         } finally {
             // Phase 4 : libération dans tous les cas
@@ -124,9 +118,6 @@ public class VehicleMovementThread {
         }
     }
 
-    private String url_begining = "http://router.project-osrm.org/route/v1/driving/";
-    private String url_ending = "?geometries=geojson&overview=simplified";
-
     private final HttpClient httpClient = HttpClient.newBuilder()
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(10))
@@ -139,7 +130,9 @@ public class VehicleMovementThread {
             throws IOException, InterruptedException {
 
         // Construction URL OSRM
-        String url = url_begining
+        String url_ending = "?geometries=geojson&overview=simplified";
+        String url_beginning = "https://router.project-osrm.org/route/v1/driving/";
+        String url = url_beginning
                 + vehicle.getLon() + "," + vehicle.getLat()
                 + ";"
                 + targetLon + "," + targetLat
@@ -183,7 +176,7 @@ public class VehicleMovementThread {
             return;
         }
 
-        // Suivi de route waypoint par waypoint
+        // suivi de route waypoint par waypoint
         for (JsonNode coord : coordinates) {
 
             double lon = coord.get(0).asDouble();
@@ -192,7 +185,7 @@ public class VehicleMovementThread {
             vehicleClient.moveVehicle(
                     teamUuid,
                     String.valueOf(vehicle.getId()),
-                    new Coord(lon, lat)
+                    new cpe.baldespompiers.model.dto.Coord(lon, lat)
             );
 
             // Debug console
@@ -215,7 +208,7 @@ public class VehicleMovementThread {
         vehicleClient.moveVehicle(
                 teamUuid,
                 String.valueOf(vehicleId),
-                new Coord(lon, lat)
+                new cpe.baldespompiers.model.dto.Coord(lon, lat)
         );
     }
 
@@ -234,7 +227,7 @@ public class VehicleMovementThread {
             // Arrivé à destination
             if (dist <= stepSize) {
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                        new Coord(targetLon, targetLat));
+                        new cpe.baldespompiers.model.dto.Coord(targetLon, targetLat));
                 break;
             }
 
@@ -243,8 +236,7 @@ public class VehicleMovementThread {
             currentLon += dLon * ratio;
             currentLat += dLat * ratio;
 
-            vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                    new Coord(currentLon, currentLat));
+            vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId), new Coord(currentLon, currentLat));
 
             Thread.sleep(stepDelayMs);
         }
@@ -253,7 +245,7 @@ public class VehicleMovementThread {
     // ── Attendre que le feu soit éteint ───────────────────────────────────────
     private void waitForFireOut(Integer fireId) throws InterruptedException {
         while (true) {
-            FireDto current = fireClient.getFireById(fireId);
+            cpe.baldespompiers.model.dto.FireDto current = fireClient.getFireById(fireId);
             if (current == null || current.getIntensity() <= 0) break;
             Thread.sleep(fireCheckDelayMs);
         }
@@ -266,6 +258,6 @@ public class VehicleMovementThread {
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
 
-        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), fire);
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat());
     }
 }

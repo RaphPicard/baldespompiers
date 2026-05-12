@@ -1,4 +1,5 @@
-import cpe.baldespompiers.model.type;
+package cpe.baldespompiers.model.type;
+
 import java.util.HashMap;
 import java.util.Map;
 

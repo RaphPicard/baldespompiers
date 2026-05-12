@@ -4,6 +4,7 @@ import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -85,7 +86,7 @@ public class VehicleClient {
     /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */
     public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
         return webClient.put()
-                .uri("/vehicle/move/{teamuuid}/{id}", teamUuid, vehicleId)
+                .uri("/vehicle/move/{team uuid}/{id}", teamUuid, vehicleId)
                 .header("Authorization", token)
                 .bodyValue(destination)
                 .retrieve()

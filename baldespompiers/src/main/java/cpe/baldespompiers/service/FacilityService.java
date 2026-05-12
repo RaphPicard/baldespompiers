@@ -23,7 +23,7 @@ public class FacilityService {
     private String teamUuid;
 
 
-    public FacilityService(FacilityClient facilityClient, WorkSessionService workSessionService) {
+    public FacilityService(FacilityClient facilityClient) {
         this.facilityClient = facilityClient;
     }
 
@@ -34,3 +34,5 @@ public class FacilityService {
     public FacilityDto getFacilityById(String id) {
         return facilityClient.getFacilityById(id);
     }
+
+}

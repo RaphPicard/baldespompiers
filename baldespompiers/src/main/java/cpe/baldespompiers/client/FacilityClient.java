@@ -13,4 +13,7 @@ package cpe.baldespompiers.client;
  */
 
 public class FacilityClient {
+
+    @Value("${simulator.token:}");
+    private String token;
 }

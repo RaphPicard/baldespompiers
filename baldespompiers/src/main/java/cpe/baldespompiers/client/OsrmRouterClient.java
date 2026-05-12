@@ -7,4 +7,7 @@ package cpe.baldespompiers.client;
  */
 
 public class OsrmRouterClient {
+
+    @Value("${simulator.token:}");
+    private String token;
 }

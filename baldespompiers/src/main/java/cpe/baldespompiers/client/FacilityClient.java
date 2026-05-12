@@ -1,7 +1,8 @@
 package cpe.baldespompiers.client;
 
-import com.project.model.dto.FacilityDto;
+import cpe.baldespompiers.model.dto.FacilityDto;
 import com.project.model.dto.Facility;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -22,7 +23,7 @@ import java.util.List;
 public class FacilityClient {
 
     private final WebClient webClient;
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 
     public FacilityClient(WebClient simulatorWebClient) {

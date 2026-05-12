@@ -1,11 +1,13 @@
 package cpe.baldespompiers.client;
 
-import com.project.model.dto.EmergencyEventDto;
+import cpe.baldespompiers.model.dto.EmergencyEventDto;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
+
 /**
  * Client pour le domaine road-person-event-rest-crt.
  *
@@ -17,7 +19,7 @@ import java.util.List;
 
 @Component
 public class RpEventClient {
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 
     private final WebClient webClient;

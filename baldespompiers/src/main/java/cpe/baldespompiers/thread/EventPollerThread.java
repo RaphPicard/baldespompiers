@@ -40,7 +40,8 @@ public class EventPollerThread {
         this.emergencyManagerService = emergencyManagerService;
     }
 
-    @Scheduled(fixedDelayString = "${poller.interval-ms:5000}")
+    @Scheduled(fixedDelayString = "${poller.interval-ms:5000}") // fixedDelay = attendre que  l'exec soit finie et attendre le delay
+    // fixedRate = toutes les 5 secondes
     public void pollAndDispatch() {
         try {
             List<FireDto> fires = fireClient.getAllFires();

@@ -1,7 +1,13 @@
 package cpe.baldespompiers.thread;
 
+import cpe.baldespompiers.client.FacilityClient;
+import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.FacilityDto;
+import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
+import cpe.baldespompiers.service.EmergencyManagerService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
@@ -85,7 +91,7 @@ public class VehicleMovementThread {
         vehicleClient.moveVehicle(
                 teamUuid,
                 String.valueOf(vehicleId),
-                new CoordDto(lon, lat)
+                new Coord(lon, lat)
         );
     }
 
@@ -104,7 +110,7 @@ public class VehicleMovementThread {
             // Arrivé à destination
             if (dist <= stepSize) {
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                        new CoordDto(targetLon, targetLat));
+                        new Coord(targetLon, targetLat));
                 break;
             }
 
@@ -114,7 +120,7 @@ public class VehicleMovementThread {
             currentLat += dLat * ratio;
 
             vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                    new CoordDto(currentLon, currentLat));
+                    new Coord(currentLon, currentLat));
 
             Thread.sleep(stepDelayMs);
         }
@@ -133,7 +139,7 @@ public class VehicleMovementThread {
     private void returnToFacility(VehicleDto vehicle) throws InterruptedException {
         if (vehicle.getFacilityRefID() == null) return;
 
-        FacilityDto facility = facilityClient.getFacilityById(vehicle.getFacilityRefID());
+        FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
 
         if ("straight".equals(movementMode)) {

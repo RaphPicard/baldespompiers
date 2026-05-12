@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -62,17 +63,19 @@ public class EmergencyManagerService {
     private void dispatch(VehicleDto vehicle, FireDto fire) {
         log.info("Dispatch véhicule {} → feu #{} (intensité={})", vehicle.getId(), fire.getId(), fire.getIntensity());
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
+        assignedFires.add(fire.getId()); // on l'ajoute à la liste des feux avec un véhicule déjà assignés
         vehicleMovementThread.moveVehicle(
                 vehicle,
                 fire,
                 teamUuid,
-                () -> onArrived(vehicle.getId())
+                () -> onArrived(vehicle.getId(), fire.getId())
         );
     }
 
-    public void onArrived(Integer vehicleId) {
+    public void onArrived(Integer vehicleId, FireDto fire) {
         log.info("Véhicule {} libéré", vehicleId);
         vehicleStates.remove(vehicleId);
+        assignedFires.remove(fire.getId());
     }
 
     public Map<Integer, VehicleState> getVehicleStates() {

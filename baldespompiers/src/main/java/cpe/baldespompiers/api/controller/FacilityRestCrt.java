@@ -1,7 +1,7 @@
 package cpe.baldespompiers.api.controller;
 
-import com.project.model.dto.FacilityDto;
-import fr.cpe.baldespompiers.service.FacilityService;
+import cpe.baldespompiers.model.dto.FacilityDto;
+import cpe.baldespompiers.service.FacilityService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,7 +22,7 @@ public class FacilityRestCrt {
     }
 
     @GetMapping("/{id}")
-    public FacilityDto getFacility(@PathVariable String id) {
+    public FacilityDto getFacilityById(@PathVariable String id) {
         return facilityService.getFacilityById(id);
     }
 }

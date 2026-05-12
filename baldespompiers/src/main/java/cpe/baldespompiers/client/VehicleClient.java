@@ -1,7 +1,8 @@
-package fr.cpe.cpefighter.client;
+package cpe.baldespompiers.client;
 
-import com.project.model.dto.Coord;
-import com.project.model.dto.VehicleDto;
+import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.VehicleDto;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -27,7 +28,7 @@ import java.util.List;
 public class VehicleClient {
 
     private final WebClient webClient;
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 
     public VehicleClient(WebClient simulatorWebClient) {

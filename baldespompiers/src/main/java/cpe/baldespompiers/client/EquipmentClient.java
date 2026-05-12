@@ -1,9 +1,13 @@
 package cpe.baldespompiers.client;
 
 import com.project.model.dto.Equipment;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+
+import java.util.List;
+
 /**
  * Client pour le domaine equipment-rest-crt.
  *
@@ -15,9 +19,10 @@ import org.springframework.web.reactive.function.client.WebClient;
  *   POST /equipment  → créer un équipement
  */
 
+@Component
 public class EquipmentClient {
     private final WebClient webClient;
-    @Value("${simulator.token:}");
+    @Value("${simulator.token:}")
     private String token;
 
     public EquipmentClient(WebClient simulatorWebClient) {
@@ -34,24 +39,22 @@ public class EquipmentClient {
     }
 
     public void updateEquipment(Equipment equipment) {
-        return webclient.put()
+        webClient.put()
                 .uri("/equipment")
                 .header("Authorization", token)
-                .bodyvalue(equipment)
+                .bodyValue(equipment)
                 .retrieve()
                 .bodyToMono(Void.class)
                 .block();
     }
 
-    public void updateEquipment(Equipment equipment) {
-        return webclient.post()
+    public void addEquipment(Equipment equipment) {
+        webClient.post()
                 .uri("/equipment")
                 .header("Authorization", token)
-                .bodyvalue(equipment)
+                .bodyValue(equipment)
                 .retrieve()
                 .bodyToMono(Void.class)
                 .block();
     }
-
-
 }

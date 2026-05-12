@@ -1,24 +1,25 @@
 package cpe.baldespompiers.api.controller;
 
-import com.project.model.dto.Coord;
-import com.project.model.dto.VehicleDto;
-import fr.cpe.baldespompiers.service.VehicleService;
-import fr.cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.VehicleDto;
+import cpe.baldespompiers.service.VehicleService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/vehicles")
-public class VehicleController {
+public class VehicleRestCrt {
 
     private final VehicleService vehicleService;
     private final VehicleClient vehicleClient;
-    @Value("${simulator.team-uuid:}");
+    @Value("${simulator.team-uuid:}")
     private String team_uuid;
 
-    public VehicleController(VehicleService vehicleService,
-                             VehicleClient vehicleClient) {
+    public VehicleRestCrt(VehicleService vehicleService,
+                          VehicleClient vehicleClient) {
         this.vehicleService = vehicleService;
         this.vehicleClient = vehicleClient;
     }

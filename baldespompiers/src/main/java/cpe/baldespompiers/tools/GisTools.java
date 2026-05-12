@@ -14,7 +14,7 @@ import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.operation.MathTransform;
 import org.opengis.referencing.operation.TransformException;
 
-import com.project.model.dto.Coord;
+import cpe.baldespompiers.model.dto.Coord;
 
 public class GisTools {
     public static final int SIR_4326=4326;

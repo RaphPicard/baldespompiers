@@ -1,8 +1,5 @@
 package cpe.baldespompiers.model.dto;
 
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.Point;
-
 public class InjuredPeopleDto {
     private Integer id;
     InjuryDto injuryDto;

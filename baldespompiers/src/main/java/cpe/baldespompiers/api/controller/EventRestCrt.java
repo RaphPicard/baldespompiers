@@ -1,7 +1,7 @@
 package cpe.baldespompiers.api.controller;
 
-import com.project.model.dto.EmergencyEventDto;
-import fr.cpe.baldespompiers.thread.EventPollerThread;
+import cpe.baldespompiers.model.dto.EmergencyEventDto;
+import cpe.baldespompiers.thread.EventPollerThread;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

@@ -245,5 +245,14 @@ cpefighter/
 - Finir les services --> fait
 
 # @TODO :
-- Faire les 3 configs 
+- Regarder pourquoi le PUT vehicle en céer un nouveau (new id auto incrémenter)
+- Pourquoi un type WATER est quand même lent sur un feu typeA ?
+- Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
+- prendre en compte vitesse max pour déplacement via api OSRM (road) + chek pk des fois ca va vite
+- faire le polling pour récupérer les feux et les événements (EventPollerThread) + afficher sur la carte (frontend) ?? --> evan ?
+- Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**) 
+- Prendre en compte le type d'anti-feu pour dispatch aux feux (ex : feu type A --> camion avec eau, etc.)
+==> pour ça, il faut faire un mapping entre les types de feux et les types de véhicules (ex : FEU_TYPE_A --> FIRE_ENGINE, etc.)
+==> Stratégie d'affectation : pour chaque feu, trouver le véhicule le plus proche qui a le bon type d'anti-feu, et l'affecter
+- Prendre en compte le nombre de pompiers, l'essence, le liquide qui diminue ...

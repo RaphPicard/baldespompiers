@@ -1,7 +1,6 @@
 package cpe.baldespompiers.client;
 
 import cpe.baldespompiers.model.dto.FacilityDto;
-import com.project.model.dto.Facility;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -52,13 +51,13 @@ public class FacilityClient {
                 .block();
     }
 
-    /** Retourne l'objet géométrique (Facility) — utile pour afficher la caserne sur la carte */
-    public Facility getFacilityObject(String id) {
+    /** Retourne l'objet géométrique brut (Map) — Facility n'existe pas encore dans la lib partagée */
+    public Object getFacilityObject(String id) {
         return webClient.get()
                 .uri("/facility/object/{id}", id)
                 .header("Authorization", token)
                 .retrieve()
-                .bodyToMono(Facility.class)
+                .bodyToMono(Object.class)
                 .block();
     }
 }

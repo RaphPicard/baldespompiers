@@ -1,14 +1,14 @@
 package cpe.baldespompiers.service;
 
-import com.project.model.dto.VehicleDto;
 import cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.model.dto.VehicleDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -25,9 +25,10 @@ public class VehicleService {
     private static final Logger log = LoggerFactory.getLogger(VehicleService.class);
 
     private final VehicleClient vehicleClient;
+    private final Set<String> busyVehicleIds = ConcurrentHashMap.newKeySet();
+
     @Value("${simulator.team.uuid}")
     private String teamUuid;
-
 
     public VehicleService(VehicleClient vehicleClient) {
         this.vehicleClient = vehicleClient;
@@ -38,9 +39,7 @@ public class VehicleService {
     }
 
     public VehicleDto addVehicle(VehicleDto dto) {
-        VehicleDto created = vehicleClient.addVehicle(this.teamUuid, dto);
-        //if (created != null) initCacheForVehicle(created);
-        return created;
+        return vehicleClient.addVehicle(this.teamUuid, dto);
     }
 
     /**
@@ -48,12 +47,10 @@ public class VehicleService {
      * Un véhicule hors caserne supprimé = -500 points !
      */
     public Boolean deleteVehicle(String vehicleId) {
-        VehicleStateCache state = stateCache.get(vehicleId);
-        if (state != null && state.isBusy()) {
+        if (busyVehicleIds.contains(vehicleId)) {
             log.warn("REFUS suppression véhicule {} — il est en mission ! Pénalité -500 pts évitée.", vehicleId);
             return false;
         }
-        stateCache.remove(vehicleId);
         return vehicleClient.deleteVehicle(this.teamUuid, vehicleId);
     }
 }

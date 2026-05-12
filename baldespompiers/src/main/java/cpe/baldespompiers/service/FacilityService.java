@@ -9,8 +9,8 @@ package cpe.baldespompiers.service;
  *   - Maintien du cache d'état local des casernes
  *   - Connaissance des véhicules disponibles par caserne
  */
-import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.client.FacilityClient;
+import cpe.baldespompiers.model.dto.FacilityDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 

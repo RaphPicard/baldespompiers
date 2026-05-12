@@ -2,11 +2,9 @@ package cpe.baldespompiers.thread;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.project.model.dto.FireDto;
 import com.project.model.dto.VehicleDto;
 import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.client.FireClient;
-
 import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.FacilityDto;
@@ -84,6 +82,8 @@ public class VehicleMovementThread {
 
         } catch (InterruptedException | IOException e) {
             Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            System.err.println("[Move] Erreur OSRM pour véhicule " + vehicle.getId() + " : " + e.getMessage());
         } finally {
             // Phase 4 : libération dans tous les cas
             if (onDone != null) onDone.run();

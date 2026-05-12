@@ -33,6 +33,7 @@ public class EmergencyManagerService {
 
     private final VehicleMovementThread vehicleMovementThread;
     private final Map<Integer, VehicleState> vehicleStates = new ConcurrentHashMap<>();
+    private final Set<Integer> assignedFires = ConcurrentHashMap.newKeySet();
 
     @Value("${simulator.team.uuid}")
     private String teamUuid;
@@ -47,6 +48,8 @@ public class EmergencyManagerService {
                 .toList();
 
         for (FireDto fire : sortedFires) {
+            // ← on skip ce feu si déjà un véhicule dessus
+            if (assignedFires.contains(fire.getId())) continue;
             vehicles.stream()
                     .filter(v -> !vehicleStates.containsKey(v.getId()))
                     .filter(v -> v.getCrewMember() > 0)

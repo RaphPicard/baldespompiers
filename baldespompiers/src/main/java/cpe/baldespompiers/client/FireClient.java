@@ -56,7 +56,7 @@ public class FireClient {
                         .queryParam("lonCoord2", lon2)
                         .queryParam("latCoord2", lat2)
                         .build())
-                .header("Authorization", jwtAuthClient.getBearerHeader())
+                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(Integer.class)
                 .block();

@@ -238,9 +238,12 @@ cpefighter/
 - Setup Maven et Spring Boot (pas fini)
 - Implémentation des clients les plus faciles
 
-# TODO : 
+# FAIT : 
 - Implémenter Auth + JWT + session !!! --> Non car pour les profs
-- Finir les clients
-- Finir les controllers
-- Finir les services
-- Faire les 3 configs
+- Finir les clients --> fait
+- Finir les controllers --> fait
+- Finir les services --> fait
+
+# @TODO :
+- Faire les 3 configs 
+- FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur

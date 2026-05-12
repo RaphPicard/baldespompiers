@@ -2,16 +2,9 @@ package cpe.baldespompiers.thread;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.project.model.dto.Coord;
-import com.project.model.dto.FacilityDto;
-import com.project.model.dto.FireDto;
-import com.project.model.dto.VehicleDto;
-import cpe.baldespompiers.client.FacilityClient;
-import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
-import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
@@ -90,6 +83,8 @@ public class VehicleMovementThread {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            System.err.println("[Move] Erreur OSRM pour véhicule " + vehicle.getId() + " : " + e.getMessage());
         } finally {
             // Phase 4 : libération dans tous les cas
             if (onDone != null) onDone.run();
@@ -266,6 +261,6 @@ public class VehicleMovementThread {
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
 
-        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), fire);
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat());
     }
 }

@@ -1,6 +1,6 @@
 package cpe.baldespompiers.model.dto;
 
-import com.project.model.type.InjuryType;
+import cpe.baldespompiers.model.type.InjuryType;
 
 public class InjuryDto {
 

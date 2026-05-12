@@ -2,6 +2,7 @@ package cpe.baldespompiers.thread;
 
 import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
+import cpe.baldespompiers.model.dto.EmergencyEventDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
@@ -68,4 +69,6 @@ public class EventPollerThread {
 
     public List<FireDto> getCachedFires() { return cachedFires; }
     public List<VehicleDto> getCachedVehicles() { return cachedVehicles; }
+    // @TODO : implémenter le polling events (RpEventClient) — stub pour compilation
+    public List<EmergencyEventDto> getCachedEvents() { return List.of(); }
 }

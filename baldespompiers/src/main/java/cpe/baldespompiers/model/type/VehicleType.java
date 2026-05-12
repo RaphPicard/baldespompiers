@@ -1,4 +1,5 @@
-import cpe.baldespompiers.model.type;
+package cpe.baldespompiers.model.type;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -78,13 +79,13 @@ public enum VehicleType {
 
     private int spaceUsedInFacility;
     private int vehicleCrewCapacity;
-    private Map<EmergencyType,Float> efficiencyMap =new HashMap<>(); // need all crew member to reach full efficiency value between 0 and 10
-    private float liquidCapacity; // total quantity of liquid
-    private float liquidConsumption; // per second when use
-    private float fuelCapacity; // total quantity of fuel
-    private float fuelConsumption; // per km
-    private float maxSpeed; // Km/Hour
-    private int victimTransportCapacity; // nbre of InjuredPeople
+    private Map<EmergencyType,Float> efficiencyMap = new HashMap<>();
+    private float liquidCapacity;
+    private float liquidConsumption;
+    private float fuelCapacity;
+    private float fuelConsumption;
+    private float maxSpeed;
+    private int victimTransportCapacity;
 
     private VehicleType(int spaceUsedInFacility, int vehicleCrewCapacity, Map<EmergencyType,Float> efficiencyMap,
                         float liquidCapacity, float liquidConsumption, float fuelCapacity, float fuelConsumption, float maxSpeed, int victimTransportCapacity) {
@@ -93,82 +94,28 @@ public enum VehicleType {
         this.liquidCapacity = liquidCapacity;
         this.liquidConsumption = liquidConsumption;
         this.fuelCapacity = fuelCapacity;
-        this.fuelConsumption =fuelConsumption;
+        this.fuelConsumption = fuelConsumption;
         this.efficiencyMap = efficiencyMap;
-        this.maxSpeed=maxSpeed;
-        this.victimTransportCapacity=victimTransportCapacity;
-    }
-
-    public int getSpaceUsedInFacility() {
-        return this.spaceUsedInFacility;
-    }
-
-    public int getVehicleCrewCapacity() {
-        return this.vehicleCrewCapacity;
-    }
-
-    public Map<EmergencyType, Float> getEfficiencyMap() {
-        return efficiencyMap;
-    }
-
-    public void setEfficiencyMap(Map<EmergencyType, Float> efficiencyMap) {
-        this.efficiencyMap = efficiencyMap;
-    }
-
-    public int getVictimTransportCapacity() {
-        return victimTransportCapacity;
-    }
-
-    public void setVictimTransportCapacity(int victimTransportCapacity) {
+        this.maxSpeed = maxSpeed;
         this.victimTransportCapacity = victimTransportCapacity;
     }
 
-    public float getLiquidCapacity() {
-        return liquidCapacity;
-    }
-
-    public void setLiquidCapacity(float liquidCapacity) {
-        this.liquidCapacity = liquidCapacity;
-    }
-
-    public float getLiquidConsumption() {
-        return liquidConsumption;
-    }
-
-    public void setLiquidConsumption(float liquidConsumption) {
-        this.liquidConsumption = liquidConsumption;
-    }
-
-    public float getFuelCapacity() {
-        return fuelCapacity;
-    }
-
-    public void setFuelCapacity(float fuelCapacity) {
-        this.fuelCapacity = fuelCapacity;
-    }
-
-    public float getFuelConsumption() {
-        return fuelConsumption;
-    }
-
-    public void setFuelConsumption(float fuelConsumption) {
-        this.fuelConsumption = fuelConsumption;
-    }
-
-    public void setSpaceUsedInFacility(int spaceUsedInFacility) {
-        this.spaceUsedInFacility = spaceUsedInFacility;
-    }
-
-    public void setVehicleCrewCapacity(int vehicleCrewCapacity) {
-        this.vehicleCrewCapacity = vehicleCrewCapacity;
-    }
-
-    public float getMaxSpeed() {
-        return maxSpeed;
-    }
-
-    public void setMaxSpeed(float maxSpeed) {
-        this.maxSpeed = maxSpeed;
-    }
-
+    public int getSpaceUsedInFacility() { return this.spaceUsedInFacility; }
+    public int getVehicleCrewCapacity() { return this.vehicleCrewCapacity; }
+    public Map<EmergencyType, Float> getEfficiencyMap() { return efficiencyMap; }
+    public void setEfficiencyMap(Map<EmergencyType, Float> efficiencyMap) { this.efficiencyMap = efficiencyMap; }
+    public int getVictimTransportCapacity() { return victimTransportCapacity; }
+    public void setVictimTransportCapacity(int victimTransportCapacity) { this.victimTransportCapacity = victimTransportCapacity; }
+    public float getLiquidCapacity() { return liquidCapacity; }
+    public void setLiquidCapacity(float liquidCapacity) { this.liquidCapacity = liquidCapacity; }
+    public float getLiquidConsumption() { return liquidConsumption; }
+    public void setLiquidConsumption(float liquidConsumption) { this.liquidConsumption = liquidConsumption; }
+    public float getFuelCapacity() { return fuelCapacity; }
+    public void setFuelCapacity(float fuelCapacity) { this.fuelCapacity = fuelCapacity; }
+    public float getFuelConsumption() { return fuelConsumption; }
+    public void setFuelConsumption(float fuelConsumption) { this.fuelConsumption = fuelConsumption; }
+    public void setSpaceUsedInFacility(int spaceUsedInFacility) { this.spaceUsedInFacility = spaceUsedInFacility; }
+    public void setVehicleCrewCapacity(int vehicleCrewCapacity) { this.vehicleCrewCapacity = vehicleCrewCapacity; }
+    public float getMaxSpeed() { return maxSpeed; }
+    public void setMaxSpeed(float maxSpeed) { this.maxSpeed = maxSpeed; }
 }

@@ -4,7 +4,6 @@ package cpe.baldespompiers.service;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.thread.VehicleMovementThread;
-import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -73,10 +72,11 @@ public class EmergencyManagerService {
         );
     }
 
-    public void onArrived(Integer vehicleId, @MonotonicNonNull Integer fireId) {
+    public void onArrived(Integer vehicleId, Integer fireId) {
         log.info("Véhicule {} libéré", vehicleId);
         vehicleStates.remove(vehicleId);
         assignedFires.remove(fireId);
+
     }
 
     public Map<Integer, VehicleState> getVehicleStates() {

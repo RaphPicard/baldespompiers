@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js" defer></script>
+  <script src="../js/config.js" defer></script>
+  <script src="../js/api.js" defer></script>
+  <script src="../js/header.js" defer></script>
+  <script src="../js/vehicles.js" defer></script>
+</head>
+<body class="bg-gray-100">
+<div id="header"></div>
+
+<div class="p-6 flex gap-6">
+
+  <!-- Liste des véhicules -->
+  <div class="flex-1 bg-white rounded-xl shadow p-6">
+    <h2 class="text-xl font-bold mb-4">Mes véhicules</h2>
+    <div id="vehicle-list" class="flex flex-col gap-3">
+      <p class="text-gray-400">Chargement...</p>
+    </div>
+  </div>
+
+  <!-- Créer un véhicule -->
+  <div class="w-80 bg-white rounded-xl shadow p-6">
+    <h2 class="text-xl font-bold mb-4">Créer un véhicule</h2>
+
+    <div class="flex flex-col gap-3">
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Type
+        <select id="type" class="border rounded p-2">
+          <option>CAR</option>
+          <option>FIRE_ENGINE</option>
+          <option>PUMPER_TRUCK</option>
+          <option>WATER_TENDERS</option>
+          <option>TURNTABLE_LADDER_TRUCK</option>
+          <option>TRUCK</option>
+          <option>EMERGENCY_AMBULANCE</option>
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Liquide
+        <select id="liquidType" class="border rounded p-2">
+          <option>ALL</option>
+          <option>WATER</option>
+          <option>POWDER</option>
+          <option>SPECIAL_POWDER</option>
+          <option>CARBON_DIOXIDE</option>
+          <option>FOAM</option>
+        </select>
+      </label>
+
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Quantité de liquide (L)
+        <input id="liquidQuantity" type="number" value="1000" class="border rounded p-2"/>
+      </label>
+
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Carburant (L)
+        <input id="fuel" type="number" value="100" class="border rounded p-2"/>
+      </label>
+
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Équipage
+        <input id="crewMember" type="number" value="4" class="border rounded p-2"/>
+      </label>
+
+      <button onclick="submitCreateVehicle()" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded p-2 mt-2">
+        Créer
+      </button>
+
+      <p id="create-status" class="text-sm text-center text-gray-500"></p>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

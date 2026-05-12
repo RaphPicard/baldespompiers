@@ -25,19 +25,18 @@ public class VehicleMovementThread {
     private final FacilityClient facilityClient;
     private final EmergencyManagerService emergencyManagerService;
 
-    // "teleport" ou "straight" dans application.properties
+    @Value("${simulator.team.uuid}")
+    private String teamUuid;
+
     @Value("${movement.mode:teleport}")
     private String movementMode;
 
-    // Taille d'un step en degrés (~200m selon latitude Lyon)
     @Value("${movement.step.size:0.002}")
     private double stepSize;
 
-    // Délai entre deux steps en ms
     @Value("${movement.step.delay.ms:500}")
     private long stepDelayMs;
 
-    // Délai entre deux checks d'intensité du feu en ms
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
@@ -55,83 +54,67 @@ public class VehicleMovementThread {
     public void moveVehicle(VehicleDto vehicle, FireDto fire, String teamUuid, Runnable onDone) {
         try {
 
-            // ── Phase 1 : déplacement vers le feu ──────────────────────────────
-            System.out.println("[Move] Véhicule " + vehicle.getId()
-                    + " → feu " + fire.getId()
-                    + " mode=" + movementMode);
-
+            // Phase 1 : aller au feu
             if ("straight".equals(movementMode)) {
-                moveStraightLine(vehicle, fire.getLon(), fire.getLat(), teamUuid);
+                moveStraightLine(vehicle.getLon(), vehicle.getLat(),
+                        fire.getLon(), fire.getLat(),
+                        vehicle.getId());
             } else {
-                teleport(vehicle, fire.getLon(), fire.getLat(), teamUuid);
+                teleport(vehicle.getId(), fire.getLon(), fire.getLat());
             }
 
-            // ── Phase 2 : intervention — on reste sur le feu ───────────────────
+            // Phase 2 : on est sur le feu, on attend qu'il soit éteint
             emergencyManagerService.getVehicleStates()
                     .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
 
-            System.out.println("[Move] Véhicule " + vehicle.getId()
-                    + " arrivé sur feu " + fire.getId() + ", intervention...");
-
             waitForFireOut(fire.getId());
 
-            // ── Phase 3 : retour à la caserne ──────────────────────────────────
-            System.out.println("[Move] Feu " + fire.getId()
-                    + " éteint, véhicule " + vehicle.getId() + " rentre.");
-
-            returnToFacility(vehicle, teamUuid);
+            // Phase 3 : retour à la caserne
+            returnToFacility(vehicle);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            System.err.println("[Move] Thread interrompu pour véhicule " + vehicle.getId());
         } finally {
-            // ── Phase 4 : libération ───────────────────────────────────────────
+            // Phase 4 : libération dans tous les cas
             if (onDone != null) onDone.run();
-            System.out.println("[Move] Véhicule " + vehicle.getId() + " libéré.");
         }
     }
 
-    // ── Téléportation directe ─────────────────────────────────────────────────
-    private void teleport(VehicleDto vehicle, double targetLon, double targetLat,
-                          String teamUuid) {
+    // ── Téléportation ─────────────────────────────────────────────────────────
+    private void teleport(Integer vehicleId, double lon, double lat) {
         vehicleClient.moveVehicle(
                 teamUuid,
-                String.valueOf(vehicle.getId()),
-                new CoordDto(targetLon, targetLat)
+                String.valueOf(vehicleId),
+                new CoordDto(lon, lat)
         );
     }
 
-    // ── Déplacement en ligne droite pas à pas ─────────────────────────────────
-    private void moveStraightLine(VehicleDto vehicle, double targetLon, double targetLat,
-                                  String teamUuid) throws InterruptedException {
-        double currentLon = vehicle.getLon();
-        double currentLat = vehicle.getLat();
+    // ── Ligne droite simple ───────────────────────────────────────────────────
+    private void moveStraightLine(double startLon, double startLat,
+                                  double targetLon, double targetLat,
+                                  Integer vehicleId) throws InterruptedException {
+        double currentLon = startLon;
+        double currentLat = startLat;
 
         while (true) {
             double dLon = targetLon - currentLon;
             double dLat = targetLat - currentLat;
             double dist = Math.sqrt(dLon * dLon + dLat * dLat);
 
+            // Arrivé à destination
             if (dist <= stepSize) {
-                // Dernier step : position exacte du feu
-                vehicleClient.moveVehicle(
-                        teamUuid,
-                        String.valueOf(vehicle.getId()),
-                        new CoordDto(targetLon, targetLat)
-                );
+                vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
+                        new CoordDto(targetLon, targetLat));
                 break;
             }
 
-            // Avancer d'un step dans la direction du feu
+            // Avancer d'un step vers la cible
             double ratio = stepSize / dist;
             currentLon += dLon * ratio;
             currentLat += dLat * ratio;
 
-            vehicleClient.moveVehicle(
-                    teamUuid,
-                    String.valueOf(vehicle.getId()),
-                    new CoordDto(currentLon, currentLat)
-            );
+            vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
+                    new CoordDto(currentLon, currentLat));
 
             Thread.sleep(stepDelayMs);
         }
@@ -141,39 +124,24 @@ public class VehicleMovementThread {
     private void waitForFireOut(Integer fireId) throws InterruptedException {
         while (true) {
             FireDto current = fireClient.getFireById(fireId);
-
-            // null = feu supprimé du simulateur = éteint
-            if (current == null || current.getIntensity() <= 0) {
-                break;
-            }
-
-            System.out.println("[Move] Feu " + fireId
-                    + " intensité=" + current.getIntensity() + ", on continue...");
-
+            if (current == null || current.getIntensity() <= 0) break;
             Thread.sleep(fireCheckDelayMs);
         }
     }
 
-    // ── Retour à la caserne d'origine ─────────────────────────────────────────
-    private void returnToFacility(VehicleDto vehicle, String teamUuid)
-            throws InterruptedException {
-
-        if (vehicle.getFacilityRefID() == null) {
-            System.out.println("[Move] Pas de caserne pour véhicule " + vehicle.getId());
-            return;
-        }
+    // ── Retour caserne ────────────────────────────────────────────────────────
+    private void returnToFacility(VehicleDto vehicle) throws InterruptedException {
+        if (vehicle.getFacilityRefID() == null) return;
 
         FacilityDto facility = facilityClient.getFacilityById(vehicle.getFacilityRefID());
-
-        if (facility == null) {
-            System.out.println("[Move] Caserne introuvable pour véhicule " + vehicle.getId());
-            return;
-        }
+        if (facility == null) return;
 
         if ("straight".equals(movementMode)) {
-            moveStraightLine(vehicle, facility.getLon(), facility.getLat(), teamUuid);
+            moveStraightLine(vehicle.getLon(), vehicle.getLat(),
+                    facility.getLon(), facility.getLat(),
+                    vehicle.getId());
         } else {
-            teleport(vehicle, facility.getLon(), facility.getLat(), teamUuid);
+            teleport(vehicle.getId(), facility.getLon(), facility.getLat());
         }
     }
 }

@@ -10,6 +10,8 @@ import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -36,6 +38,8 @@ import java.time.Duration;
 
 @Component
 public class VehicleMovementThread {
+
+    private static final Logger log = LoggerFactory.getLogger(VehicleMovementThread.class);
 
     private final VehicleClient vehicleClient;
     private final FireClient fireClient;
@@ -78,6 +82,7 @@ public class VehicleMovementThread {
             // Phase 2 : on est sur le feu, on attend qu'il soit éteint
             emergencyManagerService.getVehicleStates()
                     .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
+            log.info("Véhicule {} arrivé sur feu #{} — attente extinction", vehicle.getId(), fire.getId());
 
             waitForFireOut(fire.getId());
 
@@ -184,7 +189,6 @@ public class VehicleMovementThread {
 
         // suivi de route waypoint par waypoint
         for (JsonNode coord : coordinates) {
-
             double lon = coord.get(0).asDouble();
             double lat = coord.get(1).asDouble();
 
@@ -253,9 +257,11 @@ public class VehicleMovementThread {
         while (true) {
             cpe.baldespompiers.model.dto.FireDto current = fireClient.getFireById(fireId);
             if (current == null || current.getIntensity() <= 0) break;
+            log.info("[Feu #{}] intensité = {}", fireId, current.getIntensity());
             Thread.sleep(fireCheckDelayMs);
         }
     }
+
 
     // ── Retour caserne ────────────────────────────────────────────────────────
     private void returnToFacility(VehicleDto vehicle) throws InterruptedException, IOException {

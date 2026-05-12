@@ -52,15 +52,15 @@ public class EventPollerThread {
             if (vehicles != null) this.cachedVehicles = vehicles;
 
             if (fires == null || fires.isEmpty()) {
-                log.debug("Aucun feu actif.");
+                log.info("Aucun feu actif.");
                 return;
             }
             if (vehicles == null || vehicles.isEmpty()) {
-                log.debug("Aucun véhicule disponible.");
+                log.info("Aucun véhicule disponible.");
                 return;
             }
 
-            log.debug("Feux actifs : {}, véhicules : {}", fires.size(), vehicles.size());
+            log.info("Feux actifs : {}, véhicules : {}", fires.size(), vehicles.size());
             emergencyManagerService.dispatchAll(fires, vehicles);
         } catch (Exception e) {
             log.error("Erreur polling : {}", e.getMessage());

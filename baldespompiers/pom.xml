@@ -105,6 +105,10 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<!-- Autorise Netty à charger ses bibliothèques natives sur Java 17+ -->
+					<jvmArguments>--enable-native-access=ALL-UNNAMED</jvmArguments>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>

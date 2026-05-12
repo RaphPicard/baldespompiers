@@ -72,7 +72,7 @@ public class VehicleMovementThread {
         this.emergencyManagerService = emergencyManagerService;
     }
 
-    @Async("vehicleMovementExecutor")
+    @Async("vehicleMovementExecutor") // voir dans config/AppConfig.java
     public void moveVehicle(VehicleDto vehicle, FireDto fire, String teamUuid, Runnable onDone) {
         try {
 
@@ -98,19 +98,33 @@ public class VehicleMovementThread {
         }
     }
 
+    /**
+     * Aiguilleur de déplacement : choisit la stratégie en fonction de la valeur
+     * de la propriété {@code movement.mode} dans application.properties.
+     *
+     * Trois modes disponibles :
+     *   "straight" = déplacement simulé en ligne droite, pas à pas
+     *   "road"     = déplacement en suivant les vraies routes (via API OSRM)
+     *   autre      = téléportation instantanée à destination (mode par défaut)
+     *
+     * @param vehicle  le véhicule à déplacer (contient sa position courante)
+     * @param teamUuid identifiant de l'équipe, requis par l'API simulateur
+     * @param lon      longitude de la destination
+     * @param lat      latitude de la destination
+     */
     private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat) throws InterruptedException, IOException {
         if ("straight".equals(movementMode)) {
-
+            // Mode ligne droite : interpolation géométrique entre position actuelle et destination
             moveStraightLine(
-                    vehicle.getLon(),
-                    vehicle.getLat(),
-                    lon,
-                    lat,
+                    vehicle.getLon(),   // longitude de départ
+                    vehicle.getLat(),   // latitude de départ
+                    lon,                // longitude d'arrivée
+                    lat,                // latitude d'arrivée
                     vehicle.getId()
             );
 
         } else if ("road".equals(movementMode)) {
-
+            // Mode route réelle : récupération du tracé via l'API OSRM puis suivi waypoint par waypoint
             moveFollower(
                     vehicle,
                     lon,
@@ -119,7 +133,7 @@ public class VehicleMovementThread {
             );
 
         } else {
-
+            // Mode téléportation (défaut) : un seul appel API, le véhicule apparaît directement à destination
             teleport(vehicle.getId(),
                     lon,
                     lat);
@@ -134,15 +148,32 @@ public class VehicleMovementThread {
 
 
 
+    /**
+     * Déplace le véhicule en suivant le tracé routier réel fourni par l'API OSRM.
+     *
+     * OSRM (Open Source Routing Machine) est un moteur de calcul d'itinéraires
+     * basé sur OpenStreetMap. On lui envoie un point de départ et un point d'arrivée,
+     * et il renvoie une liste de coordonnées GPS formant le chemin à suivre sur la route.
+     * Le véhicule est ensuite déplacé un waypoint à la fois, avec une pause entre chaque.
+     *
+     * @param vehicle   le véhicule à déplacer (fournit sa position de départ)
+     * @param targetLon longitude de destination
+     * @param targetLat latitude de destination
+     * @param teamUuid  identifiant de l'équipe, requis par l'API simulateur
+     */
     private void moveFollower(VehicleDto vehicle,
                               double targetLon,
                               double targetLat,
                               String teamUuid)
             throws IOException, InterruptedException {
 
-        // Construction URL OSRM
+        // L'API OSRM attend les coordonnées au format "lon,lat;lon,lat"
+        // "geometries=geojson" → réponse en format GeoJSON standard
+        // "overview=simplified" → tracé simplifié (moins de waypoints, suffisant pour la simulation)
         String url_ending = "?geometries=geojson&overview=simplified";
         String url_beginning = "https://router.project-osrm.org/route/v1/driving/";
+
+        // Construction de l'URL : départ "lon,lat" + ";" + arrivée "lon,lat"
         String url = url_beginning
                 + vehicle.getLon() + "," + vehicle.getLat()
                 + ";"
@@ -151,47 +182,53 @@ public class VehicleMovementThread {
 
         System.out.println("[OSRM] Request : " + url);
 
+        // Création de la requête HTTP GET vers le serveur OSRM public
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
                 .GET()
-                .timeout(Duration.ofSeconds(20))
+                .timeout(Duration.ofSeconds(20))  // abandon si pas de réponse en 20 s
                 .build();
 
+        // Envoi de la requête et lecture de la réponse en texte brut (JSON)
         HttpResponse<String> response =
                 httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-        // Vérification HTTP
+        // Si le serveur OSRM ne répond pas correctement, on abandonne le déplacement
         if (response.statusCode() != 200) {
             System.err.println("[OSRM] HTTP Error : " + response.statusCode());
             return;
         }
 
-        // Parse JSON
+        // Conversion du texte JSON en arbre de nœuds navigable (Jackson ObjectMapper)
         JsonNode root = objectMapper.readTree(response.body());
 
-        // Vérification réponse OSRM
+        // OSRM renvoie un champ "code" : "Ok" si le calcul a réussi, autre valeur sinon
         if (!"Ok".equals(root.path("code").asText())) {
             System.err.println("[OSRM] Invalid response : "
                     + root.path("code").asText());
             return;
         }
 
+        // Navigation dans la structure JSON OSRM :
+        // root → routes[0] → geometry → coordinates  (tableau de [lon, lat])
         JsonNode coordinates = root
                 .path("routes")
-                .get(0)
+                .get(0)           // on prend le premier itinéraire proposé (le meilleur)
                 .path("geometry")
                 .path("coordinates");
 
+        // Sécurité : si OSRM n'a pas renvoyé de tableau de coordonnées, on s'arrête
         if (coordinates == null || !coordinates.isArray()) {
             System.err.println("[OSRM] No coordinates found.");
             return;
         }
 
-        // suivi de route waypoint par waypoint
+        // Parcours de chaque waypoint du tracé et déplacement du véhicule
         for (JsonNode coord : coordinates) {
-            double lon = coord.get(0).asDouble();
+            double lon = coord.get(0).asDouble();  // OSRM encode [longitude, latitude]
             double lat = coord.get(1).asDouble();
 
+            // Envoi de la nouvelle position au simulateur via l'API REST
             vehicleClient.moveVehicle(
                     teamUuid,
                     String.valueOf(vehicle.getId()),
@@ -199,22 +236,34 @@ public class VehicleMovementThread {
             );
 
             // Debug console
-            System.out.println("[Move] Vehicle "
+            System.out.println("[Move OSRM] Vehicle "
                     + vehicle.getId()
                     + " -> "
                     + lon + ", "
                     + lat);
 
+            // Pause pour que l'animation soit visible dans le simulateur
             Thread.sleep(stepDelayMs);
         }
 
-        System.out.println("[Move] Vehicle "
+        System.out.println("[Move OSRM] Vehicle "
                 + vehicle.getId()
                 + " arrived at destination.");
     }
 
     // ── Téléportation ─────────────────────────────────────────────────────────
+    /**
+     * Déplace instantanément le véhicule à la destination, sans étape intermédiaire.
+     *
+     * Un seul appel à l'API simulateur suffit : le véhicule "saute" directement
+     * à la position cible.
+     *
+     * @param vehicleId identifiant du véhicule à déplacer
+     * @param lon       longitude de la destination finale
+     * @param lat       latitude de la destination finale
+     */
     private void teleport(Integer vehicleId, double lon, double lat) {
+        // Un seul PUT suffit : pas de boucle, pas d'attente, le véhicule est immédiatement à destination
         vehicleClient.moveVehicle(
                 teamUuid,
                 String.valueOf(vehicleId),
@@ -223,6 +272,22 @@ public class VehicleMovementThread {
     }
 
     // ── Ligne droite simple ───────────────────────────────────────────────────
+    /**
+     * Déplace le véhicule en ligne droite de son point de départ à sa destination,
+     * pas à pas, sans tenir compte des routes réelles.
+     *
+     * À chaque itération, on calcule la distance restante jusqu'à la cible.
+     * Si elle est inférieure à {@code stepSize}, on place directement le véhicule
+     * à l'arrivée. Sinon, on avance d'exactement {@code stepSize} unités dans la
+     * direction de la cible (interpolation vectorielle), puis on attend {@code stepDelayMs}
+     * millisecondes avant le prochain pas. ==> Animation sur la map !!!
+     *
+     * @param startLon  longitude du point de départ
+     * @param startLat  latitude du point de départ
+     * @param targetLon longitude de la destination
+     * @param targetLat latitude de la destination
+     * @param vehicleId identifiant du véhicule à déplacer
+     */
     private void moveStraightLine(double startLon, double startLat,
                                   double targetLon, double targetLat,
                                   Integer vehicleId) throws InterruptedException {
@@ -230,24 +295,32 @@ public class VehicleMovementThread {
         double currentLat = startLat;
 
         while (true) {
+            // Vecteur restant entre la position actuelle et la destination
             double dLon = targetLon - currentLon;
             double dLat = targetLat - currentLat;
+
+            // Distance euclidienne restante (en degrés de coordonnées, pas en mètres)
             double dist = Math.sqrt(dLon * dLon + dLat * dLat);
 
-            // Arrivé à destination
+            // Si on est à moins d'un pas de la cible, on se pose directement dessus pour éviter un dépassement
             if (dist <= stepSize) {
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
                         new cpe.baldespompiers.model.dto.Coord(targetLon, targetLat));
                 break;
             }
 
-            // Avancer d'un step vers la cible
+            // ratio = fraction du vecteur à parcourir pour avancer exactement de stepSize
+            // ex : si dist = 0.10 et stepSize = 0.02, ratio = 0.2 → on avance de 20 % du vecteur
             double ratio = stepSize / dist;
+
+            // Application du déplacement : nouvelle position = ancienne + fraction du vecteur
             currentLon += dLon * ratio;
             currentLat += dLat * ratio;
 
+            // Envoi de la nouvelle position au simulateur
             vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId), new Coord(currentLon, currentLat));
 
+            // Pause pour que l'animation soit visible dans le simulateur
             Thread.sleep(stepDelayMs);
         }
     }

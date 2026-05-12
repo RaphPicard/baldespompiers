@@ -2,9 +2,7 @@ package cpe.baldespompiers.client;
 
 import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.VehicleDto;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -24,13 +22,13 @@ import java.util.List;
  *
  *   // profs ?
  *   DELETE /vehicle/{teamuuid}             → supprimer tous les véhicules de l'équipe
+ *
+ * Le header Authorization est ajouté automatiquement par simulatorWebClient (voir RestClientConfig).
  */
 @Component
 public class VehicleClient {
 
     private final WebClient webClient;
-    @Value("${simulator.token:}")
-    private String token;
 
     public VehicleClient(WebClient simulatorWebClient) {
         this.webClient = simulatorWebClient;
@@ -39,7 +37,6 @@ public class VehicleClient {
     public List<VehicleDto> getAllVehicles() {
         return webClient.get()
                 .uri("/vehicles")
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<VehicleDto>>() {})
                 .block();
@@ -48,7 +45,6 @@ public class VehicleClient {
     public List<VehicleDto> getVehiclesByTeam(String teamUuid) {
         return webClient.get()
                 .uri("/vehiclebyteam/{teamuuid}", teamUuid)
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<VehicleDto>>() {})
                 .block();
@@ -57,7 +53,6 @@ public class VehicleClient {
     public VehicleDto getVehicleById(String id) {
         return webClient.get()
                 .uri("/vehicle/{id}", id)
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
                 .block();
@@ -66,7 +61,6 @@ public class VehicleClient {
     public VehicleDto addVehicle(String teamUuid, VehicleDto dto) {
         return webClient.post()
                 .uri("/vehicle/{teamuuid}", teamUuid)
-                .header("Authorization", token)
                 .bodyValue(dto)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
@@ -76,7 +70,6 @@ public class VehicleClient {
     public VehicleDto updateVehicle(String teamUuid, String vehicleId, VehicleDto dto) {
         return webClient.put()
                 .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
-                .header("Authorization", token)
                 .bodyValue(dto)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
@@ -87,7 +80,6 @@ public class VehicleClient {
     public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
         return webClient.put()
                 .uri("/vehicle/move/{team uuid}/{id}", teamUuid, vehicleId)
-                .header("Authorization", token)
                 .bodyValue(destination)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
@@ -97,7 +89,6 @@ public class VehicleClient {
     public Boolean deleteVehicle(String teamUuid, String vehicleId) {
         return webClient.delete()
                 .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(Boolean.class)
                 .block();
@@ -107,7 +98,6 @@ public class VehicleClient {
     public Boolean deleteAllVehiclesByTeam(String teamUuid) {
         return webClient.delete()
                 .uri("/vehicle/{teamuuid}", teamUuid)
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(Boolean.class)
                 .block();

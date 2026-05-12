@@ -1,7 +1,6 @@
 package cpe.baldespompiers.client;
 
 import cpe.baldespompiers.model.dto.FireDto;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
@@ -15,12 +14,11 @@ import java.util.List;
  *   GET    /fires                    → liste tous les feux actifs
  *   GET    /fire/{id}                → un feu par id
  *   GET    /fire/distance            → distance entre deux coords
+ *
+ * Le header Authorization est ajouté automatiquement par simulatorWebClient (voir RestClientConfig).
  */
 @Component
 public class FireClient {
-
-    @Value("${simulator.token:}")
-    private String token;
 
     private final WebClient webClient;
 
@@ -31,7 +29,6 @@ public class FireClient {
     public List<FireDto> getAllFires() {
         return webClient.get()
                 .uri("/fires")
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<FireDto>>() {})
                 .block();
@@ -40,7 +37,6 @@ public class FireClient {
     public FireDto getFireById(int id) {
         return webClient.get()
                 .uri("/fire/{id}", id)
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(FireDto.class)
                 .block();
@@ -59,7 +55,6 @@ public class FireClient {
                         .queryParam("lonCoord2", lon2)
                         .queryParam("latCoord2", lat2)
                         .build())
-                .header("Authorization", token)
                 .retrieve()
                 .bodyToMono(Integer.class)
                 .block();

@@ -239,7 +239,7 @@ cpefighter/
 - Implémentation des clients les plus faciles
 
 # TODO : 
-- Implémenter Auth + JWT + session !!!
+- Implémenter Auth + JWT + session !!! --> Non car pour les profs
 - Finir les clients
 - Finir les controllers
 - Finir les services

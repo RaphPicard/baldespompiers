@@ -27,7 +27,7 @@ public class VehicleService {
     private final VehicleClient vehicleClient;
     private final Set<String> busyVehicleIds = ConcurrentHashMap.newKeySet();
 
-    @Value("${simulator.team.uuid}")
+    @Value("${simulator.team-uuid}")
     private String teamUuid;
 
     public VehicleService(VehicleClient vehicleClient) {

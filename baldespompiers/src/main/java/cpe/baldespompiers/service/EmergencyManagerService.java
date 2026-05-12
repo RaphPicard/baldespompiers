@@ -36,7 +36,7 @@ public class EmergencyManagerService {
     private final Map<Integer, VehicleState> vehicleStates = new ConcurrentHashMap<>();
     private final Set<Integer> assignedFires = ConcurrentHashMap.newKeySet();
 
-    @Value("${simulator.team.uuid}")
+    @Value("${simulator.team-uuid}")
     private String teamUuid;
 
     public EmergencyManagerService(VehicleMovementThread vehicleMovementThread) {
@@ -76,6 +76,7 @@ public class EmergencyManagerService {
         log.info("Véhicule {} libéré", vehicleId);
         vehicleStates.remove(vehicleId);
         assignedFires.remove(fireId);
+
 
     }
 

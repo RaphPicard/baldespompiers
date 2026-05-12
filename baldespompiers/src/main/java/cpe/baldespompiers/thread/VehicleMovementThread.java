@@ -10,7 +10,9 @@ import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
@@ -40,7 +42,7 @@ public class VehicleMovementThread {
     private final FacilityClient facilityClient;
     private final EmergencyManagerService emergencyManagerService;
 
-    @Value("${simulator.team.uuid}")
+    @Value("${simulator.team-uuid}")
     private String teamUuid;
 
     @Value("${movement.mode:teleport}")
@@ -55,10 +57,11 @@ public class VehicleMovementThread {
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
+    @Autowired
     public VehicleMovementThread(VehicleClient vehicleClient,
                                  FireClient fireClient,
                                  FacilityClient facilityClient,
-                                 EmergencyManagerService emergencyManagerService) {
+                                 @Lazy EmergencyManagerService emergencyManagerService) {
         this.vehicleClient = vehicleClient;
         this.fireClient = fireClient;
         this.facilityClient = facilityClient;

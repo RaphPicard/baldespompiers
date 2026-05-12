@@ -27,7 +27,7 @@ public class EventPollerThread {
     private final VehicleClient vehicleClient;
     private final EmergencyManagerService emergencyManagerService;
 
-    @Value("${simulator.team.uuid}")
+    @Value("${simulator.team-uuid}")
     private String teamUuid;
 
     private volatile List<FireDto> cachedFires = List.of();

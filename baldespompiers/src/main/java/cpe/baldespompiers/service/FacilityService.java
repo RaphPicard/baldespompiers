@@ -20,7 +20,7 @@ import java.util.List;
 public class FacilityService {
 
     private final FacilityClient facilityClient;
-    @Value("${simulator.team.uuid}")
+    @Value("${simulator.team-uuid}")
     private String teamUuid;
 
 

@@ -11,6 +11,7 @@ package cpe.baldespompiers.service;
  */
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.client.FacilityClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

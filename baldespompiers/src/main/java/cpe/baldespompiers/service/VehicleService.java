@@ -1,10 +1,10 @@
 package cpe.baldespompiers.service;
 
 import com.project.model.dto.VehicleDto;
-import fr.cpe.cpefighter.client.VehicleClient;
-import fr.cpe.cpefighter.model.VehicleStateCache;
+import cpe.baldespompiers.client.VehicleClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

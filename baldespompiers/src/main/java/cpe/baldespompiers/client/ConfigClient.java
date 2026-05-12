@@ -16,4 +16,6 @@ package cpe.baldespompiers.client;
  */
 
 public class ConfigClient {
+    @Value("${simulator.token:}");
+    private String token;
 }

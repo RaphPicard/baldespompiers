@@ -126,6 +126,9 @@ public class VehicleMovementThread {
             .connectTimeout(Duration.ofSeconds(10))
             .build();
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+
+
     private void moveFollower(VehicleDto vehicle,
                               double targetLon,
                               double targetLat,

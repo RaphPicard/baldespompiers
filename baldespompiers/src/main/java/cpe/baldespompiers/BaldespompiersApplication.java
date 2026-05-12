@@ -15,3 +15,10 @@ public class BaldespompiersApplication {
 	}
 
 }
+
+// Pour raph le nul qui arrive pas à lancer : (ne pas supprimer please)
+// lsof -i :8080
+// kill ...
+// Maven --> package (.jar)
+// cd /Users/RaphaelPICARD/Desktop/CLBD/PROJET_CLBD/PM/baldespompiers
+//  java -jar target/baldespompiers-0.0.1-SNAPSHOT.jar

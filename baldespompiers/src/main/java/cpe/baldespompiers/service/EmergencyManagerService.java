@@ -60,7 +60,7 @@ public class EmergencyManagerService {
         }
     }
 
-    private void dispatch(VehicleDto vehicle, FireDto fire) {
+    public void dispatch(VehicleDto vehicle, FireDto fire) {
         log.info("Dispatch véhicule {} → feu #{} (intensité={})", vehicle.getId(), fire.getId(), fire.getIntensity());
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
         assignedFires.add(fire.getId()); // on l'ajoute à la liste des feux avec un véhicule déjà assignés

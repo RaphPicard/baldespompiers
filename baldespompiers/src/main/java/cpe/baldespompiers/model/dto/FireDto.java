@@ -1,5 +1,7 @@
 package cpe.baldespompiers.model.dto;
 
+import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,7 +34,7 @@ public class FireDto {
         }
 
     }
-    public Integer getId() {
+    public @MonotonicNonNull Integer getId() {
         return id;
     }
     public void setId(Integer id) {

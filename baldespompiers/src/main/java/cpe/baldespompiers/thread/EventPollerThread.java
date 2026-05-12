@@ -5,19 +5,22 @@ import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-
 /**
- * Polling périodique des feux et événements.
+ * Polling périodique des feux et véhicules. // @TODO : polling évents !!!
  * Les données sont cachées pour le front-end ET transmises à EmergencyManagerService.
  */
-
 @Component
 public class EventPollerThread {
+
+    private static final Logger log = LoggerFactory.getLogger(EventPollerThread.class);
 
     private final FireClient fireClient;
     private final VehicleClient vehicleClient;
@@ -25,6 +28,9 @@ public class EventPollerThread {
 
     @Value("${simulator.team.uuid}")
     private String teamUuid;
+
+    private volatile List<FireDto> cachedFires = List.of();
+    private volatile List<VehicleDto> cachedVehicles = List.of();
 
     public EventPollerThread(FireClient fireClient,
                              VehicleClient vehicleClient,
@@ -34,21 +40,31 @@ public class EventPollerThread {
         this.emergencyManagerService = emergencyManagerService;
     }
 
-    @Scheduled(fixedRate = 5000)
+    @Scheduled(fixedDelayString = "${poller.interval-ms:5000}")
     public void pollAndDispatch() {
-        List<FireDto> fires = fireClient.getAllFires();
-        List<VehicleDto> vehicles = vehicleClient.getVehiclesByTeam(teamUuid);
+        try {
+            List<FireDto> fires = fireClient.getAllFires();
+            List<VehicleDto> vehicles = vehicleClient.getVehiclesByTeam(teamUuid);
 
-        if (fires == null || fires.isEmpty()) {
-            System.out.println("[Poller] Aucun feu actif.");
-            return;
-        }
-        if (vehicles == null || vehicles.isEmpty()) {
-            System.out.println("[Poller] Aucun véhicule disponible.");
-            return;
-        }
+            if (fires != null) this.cachedFires = fires;
+            if (vehicles != null) this.cachedVehicles = vehicles;
 
-        System.out.println("[Poller] " + fires.size() + " feux, " + vehicles.size() + " véhicules");
-        emergencyManagerService.dispatchAll(fires, vehicles);
+            if (fires == null || fires.isEmpty()) {
+                log.debug("Aucun feu actif.");
+                return;
+            }
+            if (vehicles == null || vehicles.isEmpty()) {
+                log.debug("Aucun véhicule disponible.");
+                return;
+            }
+
+            log.debug("Feux actifs : {}, véhicules : {}", fires.size(), vehicles.size());
+            emergencyManagerService.dispatchAll(fires, vehicles);
+        } catch (Exception e) {
+            log.error("Erreur polling : {}", e.getMessage());
+        }
     }
+
+    public List<FireDto> getCachedFires() { return cachedFires; }
+    public List<VehicleDto> getCachedVehicles() { return cachedVehicles; }
 }

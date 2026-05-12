@@ -1,16 +1,31 @@
 package cpe.baldespompiers.thread;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.project.model.dto.Coord;
+import com.project.model.dto.FacilityDto;
+import com.project.model.dto.FireDto;
+import com.project.model.dto.VehicleDto;
+import cpe.baldespompiers.client.FacilityClient;
+import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
-import cpe.baldespompiers.model.dto.VehicleDto;
+import cpe.baldespompiers.service.EmergencyManagerService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 
 
 /**
  * Déplacement progressif d'un véhicule via @Async.
  * Un thread par véhicule, exécuté dans vehicleMovementExecutor.
- *
+
  * Modes (movement.mode dans application.properties) :
  *   "teleport" → PUT direct sur destination finale
  *   "straight" → interpolation ligne droite (+50 pts, ×1)
@@ -31,12 +46,15 @@ public class VehicleMovementThread {
     @Value("${movement.mode:teleport}")
     private String movementMode;
 
+    // Taille d'un step en degrés (~200m selon latitude Lyon)
     @Value("${movement.step.size:0.002}")
     private double stepSize;
 
+    // Délai entre deux steps en ms
     @Value("${movement.step.delay.ms:500}")
     private long stepDelayMs;
 
+    // Délai entre deux checks d'intensité du feu en ms
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
@@ -55,17 +73,14 @@ public class VehicleMovementThread {
         try {
 
             // Phase 1 : aller au feu
-            if ("straight".equals(movementMode)) {
-                moveStraightLine(vehicle.getLon(), vehicle.getLat(),
-                        fire.getLon(), fire.getLat(),
-                        vehicle.getId());
-            } else {
-                teleport(vehicle.getId(), fire.getLon(), fire.getLat());
-            }
+            movement_type(vehicle, teamUuid, fire.getLon(), fire.getLat());
 
             // Phase 2 : on est sur le feu, on attend qu'il soit éteint
             emergencyManagerService.getVehicleStates()
                     .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
+
+            System.out.println("[Move] Véhicule " + vehicle.getId()
+                    + " arrivé sur feu " + fire.getId() + ", intervention...");
 
             waitForFireOut(fire.getId());
 
@@ -74,10 +89,128 @@ public class VehicleMovementThread {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            System.err.println("[Move] Thread interrompu pour véhicule " + vehicle.getId());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         } finally {
             // Phase 4 : libération dans tous les cas
             if (onDone != null) onDone.run();
+            System.out.println("[Move] Véhicule " + vehicle.getId() + " libéré.");
         }
+    }
+
+    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat) throws InterruptedException, IOException {
+        if ("straight".equals(movementMode)) {
+
+            moveStraightLine(
+                    vehicle.getLon(),
+                    vehicle.getLat(),
+                    lon,
+                    lat,
+                    vehicle.getId()
+            );
+
+        } else if ("road".equals(movementMode)) {
+
+            moveFollower(
+                    vehicle,
+                    lon,
+                    lat,
+                    teamUuid
+            );
+
+        } else {
+
+            teleport(vehicle.getId(),
+                    lon,
+                    lat);
+        }
+    }
+
+    private String url_begining = "http://router.project-osrm.org/route/v1/driving/";
+    private String url_ending = "?geometries=geojson&overview=simplified";
+
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
+    private final ObjectMapper objectMapper = new ObjectMapper();
+    private void moveFollower(VehicleDto vehicle,
+                              double targetLon,
+                              double targetLat,
+                              String teamUuid)
+            throws IOException, InterruptedException {
+
+        // Construction URL OSRM
+        String url = url_begining
+                + vehicle.getLon() + "," + vehicle.getLat()
+                + ";"
+                + targetLon + "," + targetLat
+                + url_ending;
+
+        System.out.println("[OSRM] Request : " + url);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .GET()
+                .timeout(Duration.ofSeconds(20))
+                .build();
+
+        HttpResponse<String> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        // Vérification HTTP
+        if (response.statusCode() != 200) {
+            System.err.println("[OSRM] HTTP Error : " + response.statusCode());
+            return;
+        }
+
+        // Parse JSON
+        JsonNode root = objectMapper.readTree(response.body());
+
+        // Vérification réponse OSRM
+        if (!"Ok".equals(root.path("code").asText())) {
+            System.err.println("[OSRM] Invalid response : "
+                    + root.path("code").asText());
+            return;
+        }
+
+        JsonNode coordinates = root
+                .path("routes")
+                .get(0)
+                .path("geometry")
+                .path("coordinates");
+
+        if (coordinates == null || !coordinates.isArray()) {
+            System.err.println("[OSRM] No coordinates found.");
+            return;
+        }
+
+        // Suivi de route waypoint par waypoint
+        for (JsonNode coord : coordinates) {
+
+            double lon = coord.get(0).asDouble();
+            double lat = coord.get(1).asDouble();
+
+            vehicleClient.moveVehicle(
+                    teamUuid,
+                    String.valueOf(vehicle.getId()),
+                    new Coord(lon, lat)
+            );
+
+            // Debug console
+            System.out.println("[Move] Vehicle "
+                    + vehicle.getId()
+                    + " -> "
+                    + lon + ", "
+                    + lat);
+
+            Thread.sleep(stepDelayMs);
+        }
+
+        System.out.println("[Move] Vehicle "
+                + vehicle.getId()
+                + " arrived at destination.");
     }
 
     // ── Téléportation ─────────────────────────────────────────────────────────
@@ -85,7 +218,7 @@ public class VehicleMovementThread {
         vehicleClient.moveVehicle(
                 teamUuid,
                 String.valueOf(vehicleId),
-                new CoordDto(lon, lat)
+                new Coord(lon, lat)
         );
     }
 
@@ -104,7 +237,7 @@ public class VehicleMovementThread {
             // Arrivé à destination
             if (dist <= stepSize) {
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                        new CoordDto(targetLon, targetLat));
+                        new Coord(targetLon, targetLat));
                 break;
             }
 
@@ -114,7 +247,7 @@ public class VehicleMovementThread {
             currentLat += dLat * ratio;
 
             vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
-                    new CoordDto(currentLon, currentLat));
+                    new Coord(currentLon, currentLat));
 
             Thread.sleep(stepDelayMs);
         }
@@ -130,18 +263,12 @@ public class VehicleMovementThread {
     }
 
     // ── Retour caserne ────────────────────────────────────────────────────────
-    private void returnToFacility(VehicleDto vehicle) throws InterruptedException {
+    private void returnToFacility(VehicleDto vehicle) throws InterruptedException, IOException {
         if (vehicle.getFacilityRefID() == null) return;
 
         FacilityDto facility = facilityClient.getFacilityById(vehicle.getFacilityRefID());
         if (facility == null) return;
 
-        if ("straight".equals(movementMode)) {
-            moveStraightLine(vehicle.getLon(), vehicle.getLat(),
-                    facility.getLon(), facility.getLat(),
-                    vehicle.getId());
-        } else {
-            teleport(vehicle.getId(), facility.getLon(), facility.getLat());
-        }
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), fire);
     }
 }

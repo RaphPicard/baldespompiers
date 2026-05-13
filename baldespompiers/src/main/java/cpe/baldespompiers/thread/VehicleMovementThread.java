@@ -246,10 +246,24 @@ public class VehicleMovementThread {
             Thread.sleep(stepDelayMs);
         }
 
+        // OSRM snapper les coordonnées sur la route : le dernier waypoint n'est pas
+        // exactement la destination demandée. On force un déplacement final vers la
+        // position exacte pour que le simulateur reconnaisse l'arrivée (ex: réduction
+        // de l'intensité d'un feu).
+        vehicleClient.moveVehicle(
+                teamUuid,
+                String.valueOf(vehicle.getId()),
+                new cpe.baldespompiers.model.dto.Coord(targetLon, targetLat)
+        );
+        Thread.sleep(stepDelayMs);
+
         System.out.println("[Move OSRM] Vehicle "
                 + vehicle.getId()
                 + " arrived at destination.");
     }
+
+
+
 
     // ── Téléportation ─────────────────────────────────────────────────────────
     /**

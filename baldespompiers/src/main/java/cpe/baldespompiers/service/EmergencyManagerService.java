@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import cpe.baldespompiers.model.type.LiquidType;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +44,12 @@ public class EmergencyManagerService {
         this.vehicleMovementThread = vehicleMovementThread;
     }
 
+    //ON utilise le calcul de l'efficacité d'un liquide sur un feu
+    private boolean isLiquidCompatible(LiquidType liquid, String fireType) {
+        if (liquid == null) return false;
+        return liquid.getEfficiency(fireType) > 0;
+    }
+
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
         List<FireDto> sortedFires = fires.stream()
                 .sorted(Comparator.comparingDouble(FireDto::getIntensity).reversed())
@@ -53,12 +60,16 @@ public class EmergencyManagerService {
             if (assignedFires.contains(fire.getId())) continue;
             vehicles.stream()
                     .filter(v -> !vehicleStates.containsKey(v.getId()))
-                    .filter(v -> v.getCrewMember() > 0)
+                    .filter(v -> v.getCrewMember() >= 4)
                     .filter(v -> v.getLiquidQuantity() > 0)
+                    //Test si liquide compatible
+                    .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())) // ← nouveau
+
                     .findFirst()
                     .ifPresent(vehicle -> dispatch(vehicle, fire));
         }
     }
+
 
     public void dispatch(VehicleDto vehicle, FireDto fire) {
         log.info("Dispatch véhicule {} → feu #{} (intensité={})", vehicle.getId(), fire.getId(), fire.getIntensity());

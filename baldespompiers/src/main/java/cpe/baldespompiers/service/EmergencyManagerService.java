@@ -47,7 +47,7 @@ public class EmergencyManagerService {
     //ON utilise le calcul de l'efficacité d'un liquide sur un feu
     private boolean isLiquidCompatible(LiquidType liquid, String fireType) {
         if (liquid == null) return false;
-        return liquid.getEfficiency(fireType) > 0;
+        return liquid.getEfficiency(fireType) > 0.1;
     }
 
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {

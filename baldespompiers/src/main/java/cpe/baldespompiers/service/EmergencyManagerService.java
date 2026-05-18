@@ -3,6 +3,7 @@ package cpe.baldespompiers.service;
 
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
+import cpe.baldespompiers.model.type.LiquidType;
 import cpe.baldespompiers.thread.VehicleMovementThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,30 +64,49 @@ public class EmergencyManagerService {
         this.vehicleMovementThread = vehicleMovementThread;
     }
 
-    /** Score d'aptitude : préférer les véhicules les mieux ravitaillés et les plus dotés en personnel. */
-    private double vehicleScore(VehicleDto v) {
-        return v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
+    // ── Compatibilité liquide ──────────────────────────────────────────────────
+
+    /** Vrai si le liquide du véhicule est efficace contre ce type de feu (efficacité > 10 %). */
+    private boolean isLiquidCompatible(LiquidType liquid, String fireType) {
+        if (liquid == null || fireType == null) return false;
+        return liquid.getEfficiency(fireType) > 0.1;
     }
 
-    /** Véhicules libres et au-dessus des seuils minimaux. */
-    private Stream<VehicleDto> candidates(List<VehicleDto> vehicles) {
+    // ── Score d'aptitude ───────────────────────────────────────────────────────
+
+    /**
+     * Score d'aptitude d'un véhicule pour un feu donné.
+     * Pondération : compatibilité liquide (×50) > équipage (×10) > liquide + carburant.
+     * Un véhicule parfaitement compatible (efficiency=1.0) gagne +50, ce qui prime sur
+     * les petites différences de ressources, mais pas sur la taille de l'équipage.
+     */
+    private double vehicleScore(VehicleDto v, FireDto fire) {
+        double efficiency = (v.getLiquidType() != null)
+                ? v.getLiquidType().getEfficiency(fire.getType())
+                : 0.0;
+        return efficiency * 50.0 + v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
+    }
+
+    // ── Filtres de candidats ───────────────────────────────────────────────────
+
+    /** Véhicules libres, au-dessus des seuils minimaux et compatibles avec le type de feu. */
+    private Stream<VehicleDto> candidates(List<VehicleDto> vehicles, FireDto fire) {
         return vehicles.stream()
                 .filter(v -> !vehicleStates.containsKey(v.getId()))
+                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
                 .filter(v -> v.getFuel() >= minFuel)
                 .filter(v -> v.getLiquidQuantity() >= minLiquid);
     }
 
-    /** Véhicules "prêts" : au-dessus des seuils préférés, aptes à une mission complète. */
-    private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles) {
-        return candidates(vehicles)
+    /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */
+    private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles, FireDto fire) {
+        return candidates(vehicles, fire)
                 .filter(v -> v.getFuel() >= readyFuel)
                 .filter(v -> v.getLiquidQuantity() >= readyLiquid);
     }
 
-
-
-
+    // ── Dispatch ───────────────────────────────────────────────────────────────
 
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
         List<FireDto> sortedFires = fires.stream()
@@ -96,19 +116,18 @@ public class EmergencyManagerService {
         for (FireDto fire : sortedFires) {
             if (assignedFires.contains(fire.getId())) continue;
 
-            // Tier 1 : véhicule "prêt" (il a des ressources suffisantes pour une mission de manière efficace)
-            Optional<VehicleDto> ready = best_candidates(vehicles)
-                    .max(Comparator.comparingDouble(this::vehicleScore));
+            // Tier 1 : véhicule "prêt" et compatible → meilleur score
+            Optional<VehicleDto> ready = best_candidates(vehicles, fire)
+                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
 
             if (ready.isPresent()) {
-                dispatch(ready.get(), fire); // .get() pour car ready est une
-                continue;   // pour le second tier
+                dispatch(ready.get(), fire);
+                continue;
             }
 
-            // Tier 2 : aucun véhicule "prêt" → on accepte le meilleur au-dessus du minimum
-            // pour ne pas laisser le feu s'étendre pendant que les véhicules se rechargent
-            candidates(vehicles)
-                    .max(Comparator.comparingDouble(this::vehicleScore))
+            // Tier 2 : aucun véhicule "prêt" → fallback sur tout candidat compatible au-dessus du minimum
+            candidates(vehicles, fire)
+                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)))
                     .ifPresentOrElse(
                             vehicle -> {
                                 log.warn("Feu #{} — aucun véhicule prêt (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
@@ -116,7 +135,7 @@ public class EmergencyManagerService {
                                         vehicle.getId(), vehicle.getFuel(), vehicle.getLiquidQuantity());
                                 dispatch(vehicle, fire);
                             },
-                            () -> log.warn("Feu #{} — aucun véhicule disponible (tous occupés ou sous le seuil minimum)", fire.getId())
+                            () -> log.warn("Feu #{} — aucun véhicule disponible (tous occupés, sous le seuil minimum ou liquide incompatible)", fire.getId())
                     );
         }
     }

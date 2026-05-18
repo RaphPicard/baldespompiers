@@ -9,12 +9,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import cpe.baldespompiers.model.type.LiquidType;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
 /**
  * Cerveau de l'Emergency Manager.
@@ -40,14 +41,26 @@ public class EmergencyManagerService {
     @Value("${simulator.team-uuid}")
     private String teamUuid;
 
+    // Seuil absolu : en dessous, le véhicule est exclu du dispatch
+    @Value("${dispatch.min.fuel:5.0}")
+    private float minFuel;
+
+    @Value("${dispatch.min.liquid:5.0}")
+    private float minLiquid;
+
+    @Value("${dispatch.min.crew:1}")
+    private int minCrew;
+
+    // Seuil "prêt" : on préfère envoyer un véhicule au-dessus de ces valeurs.
+    // Si aucun n'est disponible, on accepte tout véhicule > seuil minimum.
+    @Value("${dispatch.ready.fuel:40.0}")
+    private float readyFuel;
+
+    @Value("${dispatch.ready.liquid:40.0}")
+    private float readyLiquid;
+
     public EmergencyManagerService(VehicleMovementThread vehicleMovementThread) {
         this.vehicleMovementThread = vehicleMovementThread;
-    }
-
-    //ON utilise le calcul de l'efficacité d'un liquide sur un feu
-    private boolean isLiquidCompatible(LiquidType liquid, String fireType) {
-        if (liquid == null) return false;
-        return liquid.getEfficiency(fireType) > 0;
     }
 
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
@@ -56,25 +69,53 @@ public class EmergencyManagerService {
                 .toList();
 
         for (FireDto fire : sortedFires) {
-            // ← on skip ce feu si déjà un véhicule dessus
             if (assignedFires.contains(fire.getId())) continue;
-            vehicles.stream()
-                    .filter(v -> !vehicleStates.containsKey(v.getId()))
-                    .filter(v -> v.getCrewMember() >= 4)
-                    .filter(v -> v.getLiquidQuantity() > 0)
-                    //Test si liquide compatible
-                    .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())) // ← nouveau
 
-                    .findFirst()
-                    .ifPresent(vehicle -> dispatch(vehicle, fire));
+            // Tier 1 : véhicule "prêt" (il a des ressources suffisantes pour une mission de manière efficace)
+            Optional<VehicleDto> ready = candidates(vehicles)
+                    .filter(v -> v.getFuel() >= readyFuel)
+                    .filter(v -> v.getLiquidQuantity() >= readyLiquid)
+                    .max(Comparator.comparingDouble(this::vehicleScore));
+
+            if (ready.isPresent()) {
+                dispatch(ready.get(), fire);
+                continue;   // pour le second tier
+            }
+
+            // Tier 2 : aucun véhicule "prêt" → on accepte le meilleur au-dessus du minimum
+            // pour ne pas laisser le feu s'étendre pendant que les véhicules se rechargent
+            candidates(vehicles)
+                    .max(Comparator.comparingDouble(this::vehicleScore))
+                    .ifPresentOrElse(
+                            vehicle -> {
+                                log.warn("Feu #{} — aucun véhicule prêt (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
+                                        fire.getId(), readyFuel, readyLiquid,
+                                        vehicle.getId(), vehicle.getFuel(), vehicle.getLiquidQuantity());
+                                dispatch(vehicle, fire);
+                            },
+                            () -> log.warn("Feu #{} — aucun véhicule disponible (tous occupés ou sous le seuil minimum)", fire.getId())
+                    );
         }
     }
 
+    /** Véhicules libres et au-dessus des seuils minimaux. */
+    private Stream<VehicleDto> candidates(List<VehicleDto> vehicles) {
+        return vehicles.stream()
+                .filter(v -> !vehicleStates.containsKey(v.getId()))
+                .filter(v -> v.getCrewMember() >= minCrew)
+                .filter(v -> v.getFuel() >= minFuel)
+                .filter(v -> v.getLiquidQuantity() >= minLiquid);
+    }
+
+    /** Score d'aptitude : préférer les véhicules les mieux ravitaillés et les plus dotés en personnel. */
+    private double vehicleScore(VehicleDto v) {
+        return v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
+    }
 
     public void dispatch(VehicleDto vehicle, FireDto fire) {
         log.info("Dispatch véhicule {} → feu #{} (intensité={})", vehicle.getId(), fire.getId(), fire.getIntensity());
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
-        assignedFires.add(fire.getId()); // on l'ajoute à la liste des feux avec un véhicule déjà assignés
+        assignedFires.add(fire.getId());
         vehicleMovementThread.moveVehicle(
                 vehicle,
                 fire,
@@ -87,8 +128,6 @@ public class EmergencyManagerService {
         log.info("Véhicule {} libéré", vehicleId);
         vehicleStates.remove(vehicleId);
         assignedFires.remove(fireId);
-
-
     }
 
     public Map<Integer, VehicleState> getVehicleStates() {

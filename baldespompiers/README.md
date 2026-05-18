@@ -247,12 +247,19 @@ cpefighter/
 # @TODO :
 - Regarder pourquoi le PUT vehicle en céer un nouveau (new id auto incrémenter)
 - Pourquoi un type WATER est quand même lent sur un feu typeA ?
+- 
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
+
 - prendre en compte vitesse max pour déplacement via api OSRM (road) + chek pk des fois ca va vite
+
 - faire le polling pour récupérer les feux et les événements (EventPollerThread) + afficher sur la carte (frontend) ?? --> evan ?
+
 - Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**) 
 - Prendre en compte le type d'anti-feu pour dispatch aux feux (ex : feu type A --> camion avec eau, etc.)
 ==> pour ça, il faut faire un mapping entre les types de feux et les types de véhicules (ex : FEU_TYPE_A --> FIRE_ENGINE, etc.)
 ==> Stratégie d'affectation : pour chaque feu, trouver le véhicule le plus proche qui a le bon type d'anti-feu, et l'affecter
-- Prendre en compte le nombre de pompiers, l'essence, le liquide qui diminue ...
+
+
+- Prendre en compte le nombre de pompiers, l'essence qui diminue, le liquide qui diminue ... Si liquide ou essence trop faible alors préférable d'envoyer un autre véhicule
+==> En fait l'essence et liquide diminue auto, moi je dois juste dispatch en fonction des ces paramètres (déjà fait ?) et choisir si attendre que le véhicule soit à 60,80,100% de fuel (resp. liquide). Donc choisis ce qui est le plus optimale et impélmentes le

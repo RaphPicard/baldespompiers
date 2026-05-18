@@ -103,6 +103,22 @@ public class VehicleMovementThread {
         }
     }
 
+    /**
+     * Déplacement progressif vers une coordonnée arbitraire (sans logique feu/caserne).
+     * Utilisé par /api/vehicles/{id}/move pour respecter la vitesse max du simulateur.
+     */
+    @Async("vehicleMovementExecutor")
+    public void moveTo(VehicleDto vehicle, double lon, double lat) {
+        try {
+            movement_type(vehicle, teamUuid, lon, lat);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Déplacement interrompu pour véhicule {}", vehicle.getId());
+        } catch (IOException e) {
+            log.error("Erreur déplacement véhicule {} : {}", vehicle.getId(), e.getMessage());
+        }
+    }
+
     // ── Sélection du mode de déplacement ──────────────────────────────────────
 
     private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat)

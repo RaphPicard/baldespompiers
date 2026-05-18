@@ -17,7 +17,13 @@
 
   <!-- Liste des véhicules -->
   <div class="flex-1 bg-white rounded-xl shadow p-6">
-    <h2 class="text-xl font-bold mb-4">Mes véhicules</h2>
+    <div class="flex justify-between items-center mb-4">
+      <h2 class="text-xl font-bold">Mes véhicules</h2>
+      <button onclick="recallAllVehicles()" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded px-4 py-2 text-sm">
+        🏠 Rappeler à la caserne
+      </button>
+    </div>
+    <p id="recall-status" class="text-sm text-gray-500 mb-3"></p>
     <div id="vehicle-list" class="flex flex-col gap-3">
       <p class="text-gray-400">Chargement...</p>
     </div>

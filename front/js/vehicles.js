@@ -31,13 +31,50 @@ async function submitCreateVehicle() {
   };
 
   try {
-    await axios.post(`${API}/vehicle/${TEAM_UUID}`, data);
+    await createVehicle(data);
     document.getElementById('create-status').textContent = '✅ Véhicule créé !';
     loadVehicles();
   } catch (err) {
     document.getElementById('create-status').textContent = '❌ Erreur';
     console.error(err);
   }
+}
+
+async function recallAllVehicles() {
+  const FACILITY_LAT = 45.73158119172101;
+  const FACILITY_LON = 4.890602482113532;
+  const status = document.getElementById('recall-status');
+
+  const res = await getVehicles();
+  const vehicles = res.data;
+
+  if (vehicles.length === 0) {
+    status.textContent = 'Aucun véhicule à rappeler';
+    return;
+  }
+
+  let success = 0;
+  let failed = 0;
+  const errors = [];
+
+  for (const v of vehicles) {
+    status.textContent = `⏳ Rappel ${success + failed + 1}/${vehicles.length}...`;
+    try {
+      await moveVehicle(v.id, FACILITY_LAT, FACILITY_LON);
+      success++;
+    } catch (err) {
+      failed++;
+      const code = err.response?.status || '?';
+      errors.push(`#${v.id} (${code})`);
+      console.error(`Erreur véhicule #${v.id}:`, err);
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  let msg = `✅ ${success}/${vehicles.length} ramené(s)`;
+  if (failed > 0) msg += ` — ❌ Échecs: ${errors.join(', ')}`;
+  status.textContent = msg;
+  loadVehicles();
 }
 
 loadVehicles();

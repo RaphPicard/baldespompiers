@@ -1,5 +1,9 @@
-const getFires = () => axios.get(`${API}/fires`);
-const getVehicles = () => axios.get(`${API}/vehiclebyteam/${TEAM_UUID}`);
-const getFacility = () => axios.get(`${API}/facility/${FACILITY_ID}`);
-const moveVehicle = (id, lat, lon) => axios.put(`${API}/vehicle/move/${TEAM_UUID}/${id}`, { lat, lon });
-const createVehicle = (data) => axios.post(`${API}/vehicle/${TEAM_UUID}`, data);
+const getFires = () => axios.get(`${API}/api/fires`);
+const getVehicles = () => axios.get(`${API}/api/vehicles`);
+const getFacilities = () => axios.get(`${API}/api/facilities`);
+const getFacility = () => axios.get(`${API}/api/facilities/${FACILITY_ID}`);
+const getEvents = () => axios.get(`${API}/api/events`);
+const moveVehicle = (id, lat, lon) => axios.put(`${API}/api/vehicles/${id}/move`, { lat, lon, projection: '4326' });
+const createVehicle = (data) => axios.post(`${API}/api/vehicles`, data);
+const updateVehicle = (id, data) => axios.put(`${API}/api/vehicles/${id}`, data);
+const deleteVehicle = (id) => axios.delete(`${API}/api/vehicles/${id}`);

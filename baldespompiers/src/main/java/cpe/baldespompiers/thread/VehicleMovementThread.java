@@ -166,7 +166,7 @@ public class VehicleMovementThread {
                 + vehicle.getLon() + "," + vehicle.getLat()
                 + ";"
                 + targetLon + "," + targetLat
-                + "?geometries=geojson&overview=full";
+                + "?geometries=geojson&overview=simplified";
 
         System.out.println("[OSRM] Request : " + url);
 

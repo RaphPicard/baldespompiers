@@ -8,23 +8,6 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.List;
 
-/**
- * Client pour le domaine vehicle-rest-crt.
- *
- * Endpoints couverts :
- *   GET    /vehicles                       → tous les véhicules
- *   GET    /vehiclebyteam/{teamuuid}        → véhicules de notre équipe
- *   GET    /vehicle/{id}                   → un véhicule par id
- *   POST   /vehicle/{teamuuid}             → ajouter un véhicule
- *   PUT    /vehicle/{teamuuid}/{id}        → mettre à jour un véhicule (full update)
- *   PUT    /vehicle/move/{teamuuid}/{id}   → déplacer un véhicule
- *   DELETE /vehicle/{teamuuid}/{id}        → supprimer un véhicule
- *
- *   // profs ?
- *   DELETE /vehicle/{teamuuid}             → supprimer tous les véhicules de l'équipe
- *
- * Le header Authorization est ajouté automatiquement par simulatorWebClient (voir RestClientConfig).
- */
 @Component
 public class VehicleClient {
 
@@ -79,7 +62,7 @@ public class VehicleClient {
     /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */
     public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
         return webClient.put()
-                .uri("/vehicle/move/{team uuid}/{id}", teamUuid, vehicleId)
+                .uri("/vehicle/move/{teamuuid}/{id}", teamUuid, vehicleId)  // fix: {team uuid} → {teamuuid}
                 .bodyValue(destination)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
@@ -94,7 +77,6 @@ public class VehicleClient {
                 .block();
     }
 
-    // pour les profs ?
     public Boolean deleteAllVehiclesByTeam(String teamUuid) {
         return webClient.delete()
                 .uri("/vehicle/{teamuuid}", teamUuid)

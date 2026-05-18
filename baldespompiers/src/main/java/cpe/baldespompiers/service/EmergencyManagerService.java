@@ -63,6 +63,31 @@ public class EmergencyManagerService {
         this.vehicleMovementThread = vehicleMovementThread;
     }
 
+    /** Score d'aptitude : préférer les véhicules les mieux ravitaillés et les plus dotés en personnel. */
+    private double vehicleScore(VehicleDto v) {
+        return v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
+    }
+
+    /** Véhicules libres et au-dessus des seuils minimaux. */
+    private Stream<VehicleDto> candidates(List<VehicleDto> vehicles) {
+        return vehicles.stream()
+                .filter(v -> !vehicleStates.containsKey(v.getId()))
+                .filter(v -> v.getCrewMember() >= minCrew)
+                .filter(v -> v.getFuel() >= minFuel)
+                .filter(v -> v.getLiquidQuantity() >= minLiquid);
+    }
+
+    /** Véhicules "prêts" : au-dessus des seuils préférés, aptes à une mission complète. */
+    private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles) {
+        return candidates(vehicles)
+                .filter(v -> v.getFuel() >= readyFuel)
+                .filter(v -> v.getLiquidQuantity() >= readyLiquid);
+    }
+
+
+
+
+
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
         List<FireDto> sortedFires = fires.stream()
                 .sorted(Comparator.comparingDouble(FireDto::getIntensity).reversed())
@@ -72,13 +97,11 @@ public class EmergencyManagerService {
             if (assignedFires.contains(fire.getId())) continue;
 
             // Tier 1 : véhicule "prêt" (il a des ressources suffisantes pour une mission de manière efficace)
-            Optional<VehicleDto> ready = candidates(vehicles)
-                    .filter(v -> v.getFuel() >= readyFuel)
-                    .filter(v -> v.getLiquidQuantity() >= readyLiquid)
+            Optional<VehicleDto> ready = best_candidates(vehicles)
                     .max(Comparator.comparingDouble(this::vehicleScore));
 
             if (ready.isPresent()) {
-                dispatch(ready.get(), fire);
+                dispatch(ready.get(), fire); // .get() pour car ready est une
                 continue;   // pour le second tier
             }
 
@@ -96,20 +119,6 @@ public class EmergencyManagerService {
                             () -> log.warn("Feu #{} — aucun véhicule disponible (tous occupés ou sous le seuil minimum)", fire.getId())
                     );
         }
-    }
-
-    /** Véhicules libres et au-dessus des seuils minimaux. */
-    private Stream<VehicleDto> candidates(List<VehicleDto> vehicles) {
-        return vehicles.stream()
-                .filter(v -> !vehicleStates.containsKey(v.getId()))
-                .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuel() >= minFuel)
-                .filter(v -> v.getLiquidQuantity() >= minLiquid);
-    }
-
-    /** Score d'aptitude : préférer les véhicules les mieux ravitaillés et les plus dotés en personnel. */
-    private double vehicleScore(VehicleDto v) {
-        return v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
     }
 
     public void dispatch(VehicleDto vehicle, FireDto fire) {

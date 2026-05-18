@@ -243,23 +243,25 @@ cpefighter/
 - Finir les clients --> fait
 - Finir les controllers --> fait
 - Finir les services --> fait
+- **FAIT** : `isLiquidCompatible(liquidType, fireType)` filtre les véhicules incompatibles via la matrice d'efficacité de `LiquidType` ; `vehicleScore` intègre l'efficiency (×50) en plus de l'équipage (×10) et des ressources.
+- **FAIT** : stratégie à deux seuils dans `EmergencyManagerService.dispatchAll` :
+    - **Tier 1** (`best_candidates`) : fuel ≥ `dispatch.ready.fuel` ET liquid ≥ `dispatch.ready.liquid` ET compatible → meilleur score
+    - **Tier 2** (`candidates`) : fallback si aucun véhicule "prêt" (seuils minimaux `dispatch.min.*`) pour ne pas laisser le feu s'étendre
+    - Véhicules sous le seuil minimum ou liquide incompatible : jamais dispatchés
+    - Seuils configurables dans `application.properties`
+- **FAIT** : vitesse max prise en compte pour le déplacement — `computeStepDelay` calcule le délai entre chaque pas proportionnellement à `VehicleType.getMaxSpeed()` (référence 110 km/h)
+- **FAIT** : véhicule rentre/recharge à la caserne uniquement si nécessaire — `vehicleNeedsRecharge` vérifie fuel < minFuel ou liquid < minLiquid ; `waitForRecharge` attend les seuils `readyFuel`/`readyLiquid` avant de libérer le véhicule
+- **FAIT** : si le véhicule n'arrive pas au feu par la route (feu en forêt, zone inaccessible…), fallback automatique en ligne droite — les 3 cas d'échec OSRM (HTTP error, code invalide, pas de coordonnées) tombent sur `moveToPoint` ; le tronçon final hors-route est aussi parcouru en ligne droite
+
 
 # @TODO :
-- Regarder pourquoi le PUT vehicle en céer un nouveau (new id auto incrémenter)
+- Regarder pourquoi le PUT vehicle en crée un nouveau (new id auto incrémenté)
 - Pourquoi un type WATER est quand même lent sur un feu typeA ?
-- 
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
-
-- prendre en compte vitesse max pour déplacement via api OSRM (road) + chek pk des fois ca va vite
-
 - faire le polling pour récupérer les feux et les événements (EventPollerThread) + afficher sur la carte (frontend) ?? --> evan ?
-
-- Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**) 
-- Prendre en compte le type d'anti-feu pour dispatch aux feux (ex : feu type A --> camion avec eau, etc.)
-==> pour ça, il faut faire un mapping entre les types de feux et les types de véhicules (ex : FEU_TYPE_A --> FIRE_ENGINE, etc.)
-==> Stratégie d'affectation : pour chaque feu, trouver le véhicule le plus proche qui a le bon type d'anti-feu, et l'affecter
-
-
-- Prendre en compte le nombre de pompiers, l'essence qui diminue, le liquide qui diminue ... Si liquide ou essence trop faible alors préférable d'envoyer un autre véhicule
-==> En fait l'essence et liquide diminue auto, moi je dois juste dispatch en fonction des ces paramètres (déjà fait ?) et choisir si attendre que le véhicule soit à 60,80,100% de fuel (resp. liquide). Donc choisis ce qui est le plus optimale et impélmentes le
+- Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**)
+- Prendre en compte le nb de waypoints (distance) pour le score (pour l'instant c'est juste equipage + ressources + efficiency)
+- actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
+- Est-ce qu'on gagne plus de points en éteignant complètement un feu (dernier PV) ou juste en réduisant son intensité ? (si oui : privilégier les feux de faible intensité et renvoyer un autre camion finir le travail d'un véhicule qui abandonne par manque de ressources)
+- Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition

@@ -5,7 +5,7 @@ import java.util.Map;
 
 public enum LiquidType {
     //https://www.seton.fr/quel-extincteur-pour-quel-feu.html
-    //TODO OPTIOMIZE EFFICIENCY MATRIX
+
     ALL(0.1f,0.1f,0.1f,0.1f,0.1f),
     WATER(0.8f,0.8f,0.0f,0.0f,0.0f),
     POWDER(0.6f,0.6f,1f,0.0f,0.0f),

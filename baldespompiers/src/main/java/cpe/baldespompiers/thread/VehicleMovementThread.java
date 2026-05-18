@@ -27,6 +27,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Déplacement progressif d'un véhicule via @Async.
@@ -64,6 +65,20 @@ public class VehicleMovementThread {
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
+    // Seuils d'abandon de mission (mêmes valeurs que dans EmergencyManagerService)
+    @Value("${dispatch.min.fuel:10.0}")
+    private float minFuel;
+
+    @Value("${dispatch.min.liquid:10.0}")
+    private float minLiquid;
+
+    // Seuils "prêt" : atteints à la caserne avant de libérer le véhicule pour un nouveau dispatch
+    @Value("${dispatch.ready.fuel:40.0}")
+    private float readyFuel;
+
+    @Value("${dispatch.ready.liquid:40.0}")
+    private float readyLiquid;
+
     @Autowired
     public VehicleMovementThread(VehicleClient vehicleClient,
                                  FireClient fireClient,
@@ -75,32 +90,91 @@ public class VehicleMovementThread {
         this.emergencyManagerService = emergencyManagerService;
     }
 
+    // ── Signal d'abandon de mission ───────────────────────────────────────────
+    // RuntimeException sans stack trace pour ne pas polluer les logs.
+    private static final class InsufficientResourcesException extends RuntimeException {
+        InsufficientResourcesException(String msg) { super(msg, null, true, false); }
+    }
+
     // ── Point d'entrée principal ───────────────────────────────────────────────
-
+    // le @Async va permettre de lancer ce processus de déplacement dans un thread séparé, sans bloquer le thread principal du simulateur.
     @Async("vehicleMovementExecutor")
-    public void moveVehicle(VehicleDto vehicle, FireDto fire, String teamUuid, Runnable onDone) {
+    public void moveVehicle(VehicleDto vehicle, FireDto initialFire, String teamUuid, Runnable onDone) {
+        FireDto currentFire = initialFire;
+        boolean needsRecharge = false;
         try {
-            // Phase 1 : aller au feu
-            movement_type(vehicle, teamUuid, fire.getLon(), fire.getLat());
-            // Mise à jour de la position pour que le trajet retour parte du bon endroit
-            vehicle.setLon(fire.getLon());
-            vehicle.setLat(fire.getLat());
+            while (true) {
+                // Phase 1 : déplacer le véhicule vers le feu (mode téléport, ligne droite ou route selon config)
+                movement_type(vehicle, teamUuid, currentFire.getLon(), currentFire.getLat());
+                // Met à jour la position locale pour que les prochains calculs de distance partent du bon endroit
+                vehicle.setLon(currentFire.getLon());   // fix d'un bug... (à enlever ?)
+                vehicle.setLat(currentFire.getLat());
 
-            // Phase 2 : attente extinction du feu
-            emergencyManagerService.getVehicleStates()
-                    .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
-            log.info("Véhicule {} arrivé sur feu #{} — attente extinction", vehicle.getId(), fire.getId());
-            waitForFireOut(fire.getId());
+                // Phase 2 : marquer le véhicule comme "sur le feu" puis attendre l'extinction
+                // (le simulateur réduit l'intensité du feu automatiquement quand un véhicule est à sa position)
+                emergencyManagerService.getVehicleStates()
+                        .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
+                log.info("Véhicule {} arrivé sur feu #{} — attente extinction", vehicle.getId(), currentFire.getId());
+                waitForFireOut(currentFire.getId(), vehicle.getId()); // bloque ici jusqu'à extinction ou ressources épuisées
 
-            // Phase 3 : retour à la caserne
-            returnToFacility(vehicle);
+                // Relit les vraies ressources depuis le simulateur (carburant et liquide ont diminué pendant la mission)
+                VehicleDto refreshed = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
+                if (refreshed == null) { needsRecharge = true; break; } // si le véhicule a disparu du simulateur (erreur, suppression…) → on considère qu'il doit rentrer à la caserne pour se "recharger" (reset)
+                // Met à jour la position locale pour que les prochains calculs de distance partent du bon endroit
+                vehicle.setLon(refreshed.getLon());
+                vehicle.setLat(refreshed.getLat());
 
+                // Si les ressources sont trop basses, le véhicule doit rentrer à la caserne (break --> finally) se recharger
+                if (vehicleNeedsRecharge(refreshed)) { needsRecharge = true; break; } //break sort de la boucle While(true) et va au error/exeption et finally !!!
+
+                // Ressources suffisantes : cherche un autre feu à traiter directement, sans passer par la caserne
+                List<FireDto> activeFires = fireClient.getAllFires();
+                Optional<FireDto> next = emergencyManagerService.findNextFireForVehicle(
+                        refreshed, activeFires != null ? activeFires : List.of());
+
+                if (next.isEmpty()) {
+                    // Aucun feu disponible → le véhicule est libéré (onDone le remettra à disposition)
+                    log.info("Véhicule {} — aucun feu disponible, retour libre", vehicle.getId());
+                    break; // pour l'instant on ne le ramène pas à la caserne, il reste où il est
+                }
+
+                FireDto nextFire = next.get();
+                log.info("Véhicule {} : ressources suffisantes, direct sur feu #{} (sans caserne)",
+                        vehicle.getId(), nextFire.getId());
+                // Réserve le nouveau feu atomiquement et libère l'ancien pour les autres véhicules
+                emergencyManagerService.claimFire(vehicle.getId(), currentFire.getId(), nextFire.getId());
+                currentFire = nextFire; // reboucle sur la phase 1 avec le nouveau feu
+            }
+
+        } catch (InsufficientResourcesException e) {
+            needsRecharge = true;
+            log.warn("[Mission] Véhicule {} abandonne la mission (feu #{}) — {}", vehicle.getId(), currentFire.getId(), e.getMessage());
         } catch (InterruptedException | IOException e) {
+            needsRecharge = true;
             Thread.currentThread().interrupt();
-            System.err.println("[Move] Erreur pour véhicule " + vehicle.getId() + " : " + e.getMessage());
+            log.error("[Move] Interruption/IO véhicule {} : {}", vehicle.getId(), e.getMessage());
+        } catch (Exception e) {
+            needsRecharge = true;
+            log.error("[Move] Erreur inattendue véhicule {} ({}) : {}", vehicle.getId(), e.getClass().getSimpleName(), e.getMessage());
+
         } finally {
+            try {
+                emergencyManagerService.releaseFire(currentFire.getId());
+                if (needsRecharge) {
+                    returnToFacility(vehicle);
+                    waitForRecharge(vehicle.getId());
+                }
+            } catch (Exception e) {
+                log.error("[Move] Erreur retour/recharge véhicule {} : {}", vehicle.getId(), e.getMessage());
+            }
             if (onDone != null) onDone.run();
         }
+    }
+
+    private boolean vehicleNeedsRecharge(VehicleDto v) {
+        if (v.getFuel() < minFuel) return true; // carburant trop bas pour une nouvelle mission
+        // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
+        return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquid;
     }
 
     // ── Sélection du mode de déplacement ──────────────────────────────────────
@@ -110,15 +184,12 @@ public class VehicleMovementThread {
         long vehicleDelay = computeStepDelay(vehicle.getType());
 
         if ("straight".equals(movementMode)) {
-            // Ligne droite : un seul appel moveToPoint pour tout le trajet
             moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay);
 
         } else if ("road".equals(movementMode)) {
-            // Route réelle : OSRM + interpolation segment par segment
             moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay);
 
         } else {
-            // Téléportation (défaut)
             teleport(vehicle.getId(), lon, lat);
         }
     }
@@ -126,17 +197,16 @@ public class VehicleMovementThread {
     /**
      * Calcule le délai (ms) entre deux pas selon la vitesse max du type de véhicule.
      * Référence : 110 km/h → stepDelayMs.
-     * Un véhicule plus rapide attend moins longtemps, un plus lent attend plus.
      *
      *   CAR              (150 km/h) → stepDelayMs × 110/150 ≈ ×0.73  (plus rapide)
      *   FIRE_ENGINE      (110 km/h) → stepDelayMs × 1.00              (référence)
      *   PUMPER_TRUCK     ( 70 km/h) → stepDelayMs × 110/70  ≈ ×1.57  (plus lent)
-     *   EMERGENCY_AMBULANCE (110)   → stepDelayMs × 1.00
      */
     private long computeStepDelay(VehicleType type) {
-        if (type == null) return stepDelayMs;
+        if (type == null) return stepDelayMs; // type inconnu → délai par défaut
         float speed = type.getMaxSpeed();
-        if (speed <= 0) return stepDelayMs;
+        if (speed <= 0) return stepDelayMs; // vitesse invalide → délai par défaut
+        // Plus le véhicule est rapide, plus le délai entre deux pas est court (rapport inversement proportionnel)
         return (long) (stepDelayMs * 110.0 / speed);
     }
 
@@ -151,17 +221,13 @@ public class VehicleMovementThread {
     /**
      * Récupère l'itinéraire routier réel via OSRM (overview=full → géométrie complète),
      * puis déplace le véhicule segment par segment avec interpolation fine.
-     *
-     * overview=full donne tous les points de la route (virages, carrefours…),
-     * contrairement à overview=simplified qui en renvoie très peu.
-     * Entre chaque paire de waypoints OSRM consécutifs, moveToPoint insère
-     * des positions intermédiaires espacées de stepSize pour un mouvement fluide.
      */
     private void moveFollower(VehicleDto vehicle,
                               double targetLon, double targetLat,
                               String teamUuid, long vehicleDelay)
             throws IOException, InterruptedException {
 
+        // Construit l'URL OSRM : "lon_départ,lat_départ;lon_cible,lat_cible" avec géométrie complète
         String url = "https://router.project-osrm.org/route/v1/driving/"
                 + vehicle.getLon() + "," + vehicle.getLat()
                 + ";"
@@ -180,28 +246,35 @@ public class VehicleMovementThread {
                 httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
-            System.err.println("[OSRM] HTTP Error : " + response.statusCode());
+            // OSRM injoignable ou surchargé → on déplace quand même le véhicule en ligne droite
+            System.err.println("[OSRM] HTTP Error : " + response.statusCode() + " — fallback ligne droite");
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
             return;
         }
 
         JsonNode root = objectMapper.readTree(response.body());
 
         if (!"Ok".equals(root.path("code").asText())) {
-            System.err.println("[OSRM] Invalid response : " + root.path("code").asText());
+            // OSRM n'a pas trouvé de route (feu hors réseau routier, zone isolée…) → fallback ligne droite
+            System.err.println("[OSRM] Invalid response : " + root.path("code").asText() + " — fallback ligne droite");
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
             return;
         }
 
+        // Navigue dans le JSON OSRM pour extraire les coordonnées de l'itinéraire
         JsonNode coordinates = root
                 .path("routes").get(0)
                 .path("geometry")
                 .path("coordinates");
 
         if (coordinates == null || !coordinates.isArray()) {
-            System.err.println("[OSRM] No coordinates found.");
+            // Réponse malformée → fallback ligne droite pour ne pas bloquer le véhicule
+            System.err.println("[OSRM] No coordinates found — fallback ligne droite");
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
             return;
         }
 
-        // Conversion du tableau JSON en liste pour accès par index
+        // Convertit chaque nœud JSON [lon, lat] en tableau de doubles exploitable
         List<double[]> waypoints = new ArrayList<>();
         for (JsonNode coord : coordinates) {
             waypoints.add(new double[]{ coord.get(0).asDouble(), coord.get(1).asDouble() });
@@ -209,23 +282,30 @@ public class VehicleMovementThread {
 
         System.out.println("[OSRM] " + waypoints.size() + " waypoints reçus pour véhicule " + vehicle.getId());
 
-        // On part de l'index 0 (point de départ snapé sur la route) sans l'envoyer
-        // au simulateur — évite la téléportation initiale.
-        // Il sert uniquement de point "from" pour la première interpolation.
+        // Parcourt chaque segment de route un par un (de waypoint[i-1] à waypoint[i])
         for (int i = 1; i < waypoints.size(); i++) {
             double[] from = waypoints.get(i - 1);
             double[] to   = waypoints.get(i);
             moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay);
         }
 
-        // Position exacte finale : OSRM snape sur la route, le dernier waypoint
-        // peut être légèrement décalé de la cible réelle (ex : feu en pleine forêt).
-        vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicle.getId()),
-                new Coord(targetLon, targetLat));
-        Thread.sleep(vehicleDelay);
+        // OSRM s'arrête à la route la plus proche. Si le feu est en dehors du réseau (forêt, champ…),
+        // on parcourt le tronçon restant en ligne droite pour atteindre la position exacte du feu.
+        if (!waypoints.isEmpty()) {
+            double[] last = waypoints.get(waypoints.size() - 1);
+            double dLon = targetLon - last[0];
+            double dLat = targetLat - last[1];
+            if (Math.sqrt(dLon * dLon + dLat * dLat) > stepSize) {
+                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay);
+            }
+        }
 
         System.out.println("[Move OSRM] Vehicle " + vehicle.getId() + " arrived at destination.");
     }
+
+
+
+
 
     // ── Téléportation ─────────────────────────────────────────────────────────
 
@@ -233,18 +313,16 @@ public class VehicleMovementThread {
         vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId), new Coord(lon, lat));
     }
 
+
+
+
+
+
     // ── Interpolation pas à pas (partagée par straight et road) ───────────────
 
     /**
      * Déplace le véhicule pas à pas de (fromLon, fromLat) vers (toLon, toLat).
-     *
-     * Utilisée dans deux contextes :
-     *   - mode "straight" : appelée une fois pour tout le trajet (départ → destination)
-     *   - mode "road"     : appelée pour chaque segment entre deux waypoints OSRM consécutifs,
-     *                       produisant une interpolation fine qui suit la géométrie de la route
-     *
-     * À chaque itération, on avance de stepSize degrés dans la direction de la cible.
-     * Quand la distance restante est ≤ stepSize, on se pose exactement sur la cible.
+     * Lance InsufficientResourcesException si le carburant passe sous minFuel en cours de route.
      */
     private void moveToPoint(double fromLon, double fromLat,
                              double toLon, double toLat,
@@ -253,37 +331,64 @@ public class VehicleMovementThread {
         double currentLat = fromLat;
 
         while (true) {
+            // Calcule le vecteur restant à parcourir et sa longueur (en degrés)
             double dLon = toLon - currentLon;
             double dLat = toLat - currentLat;
             double dist = Math.sqrt(dLon * dLon + dLat * dLat);
 
             if (dist <= stepSize) {
-                // Dernier pas : on se pose exactement sur la cible du segment
+                // Distance restante inférieure à un pas : on saute directement sur la destination exacte
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
                         new Coord(toLon, toLat));
                 Thread.sleep(vehicleDelay);
                 break;
             }
 
-            // Avancer d'exactement stepSize dans la direction de la cible
+            // Avance d'exactement stepSize dans la direction de la destination (normalisation du vecteur)
             double ratio = stepSize / dist;
             currentLon += dLon * ratio;
             currentLat += dLat * ratio;
 
-            vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
+            // Envoie la nouvelle position au simulateur et récupère l'état mis à jour du véhicule
+            VehicleDto updated = vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId),
                     new Coord(currentLon, currentLat));
-            Thread.sleep(vehicleDelay);
+            Thread.sleep(vehicleDelay); // attend avant le prochain pas (simule la vitesse du véhicule)
+
+            // Coupe la mission si le carburant est trop bas pour continuer à avancer
+            if (updated != null && updated.getFuel() < minFuel)
+                throw new InsufficientResourcesException("carburant insuffisant (fuel=" + updated.getFuel() + ")");
         }
     }
 
+
+
+
+
+
+
+
     // ── Attente extinction du feu ─────────────────────────────────────────────
 
-    private void waitForFireOut(Integer fireId) throws InterruptedException {
+    /**
+     * Attend que le feu soit éteint. Lance InsufficientResourcesException si le
+     * véhicule manque de liquide avant l'extinction (uniquement pour les véhicules
+     * dont le type a une capacité liquide > 0 ==> pour que ca traite pas les ambulances).
+     */
+    private void waitForFireOut(Integer fireId, Integer vehicleId) throws InterruptedException {
         while (true) {
             FireDto current = fireClient.getFireById(fireId);
-            if (current == null || current.getIntensity() <= 0) break;
+            if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0) ou disparu → on sort
+
+            // Vérifie le niveau de liquide uniquement pour les véhicules avec réservoir (pas les ambulances)
+            VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
+            if (vehicle != null && vehicle.getType() != null
+                    && vehicle.getType().getLiquidCapacity() > 0
+                    && vehicle.getLiquidQuantity() < minLiquid)
+                // Plus assez de liquide pour continuer → abandonne la mission et rentre à la caserne
+                throw new InsufficientResourcesException("liquide insuffisant (liquid=" + vehicle.getLiquidQuantity() + ")");
+
             log.info("[Feu #{}] intensité = {}", fireId, current.getIntensity());
-            Thread.sleep(fireCheckDelayMs);
+            Thread.sleep(fireCheckDelayMs); // attend quelques secondes avant de revérifier
         }
     }
 
@@ -291,8 +396,46 @@ public class VehicleMovementThread {
 
     private void returnToFacility(VehicleDto vehicle) throws InterruptedException, IOException {
         if (vehicle.getFacilityRefID() == null) return;
+        // Récupère la position réelle du véhicule depuis le simulateur
+        // (peut différer du DTO local si la mission a été interrompue en cours de route)
+        VehicleDto current = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
+        if (current != null) {
+            vehicle.setLon(current.getLon());
+            vehicle.setLat(current.getLat());
+        }
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
         movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat());
+    }
+
+    // ── Attente du rechargement à la caserne ──────────────────────────────────
+
+    /**
+     * Attend que le véhicule atteigne les seuils readyFuel et readyLiquid
+     * (rechargement automatique par le simulateur quand le véhicule est à la caserne).
+     * Ne bloque pas si le type de véhicule n'a pas de capacité liquide/fuel (ex. ambulance).
+     */
+    private void waitForRecharge(Integer vehicleId) throws InterruptedException {
+        VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
+        if (vehicle == null || vehicle.getType() == null) return;
+
+        // Détermine ce qui manque : carburant, liquide, ou les deux
+        boolean needsFuel   = vehicle.getFuel() < readyFuel;
+        boolean needsLiquid = vehicle.getType().getLiquidCapacity() > 0 && vehicle.getLiquidQuantity() < readyLiquid;
+        if (!needsFuel && !needsLiquid) return; // déjà à niveau → pas besoin d'attendre
+
+        log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})", vehicleId, vehicle.getFuel(), vehicle.getLiquidQuantity());
+
+        while (true) {
+            Thread.sleep(fireCheckDelayMs); // le rechargement est progressif, on recheck régulièrement
+            vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
+            if (vehicle == null) break;
+            boolean fuelOk   = vehicle.getFuel()  >= readyFuel;
+            // Les ambulances (liquidCapacity == 0) sont toujours considérées "ok" côté liquide
+            boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= readyLiquid;
+            if (fuelOk && liquidOk) break; // les deux ressources sont au niveau requis → le véhicule est prêt
+            log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, vehicle.getFuel(), vehicle.getLiquidQuantity());
+        }
+        log.info("Véhicule {} rechargé — prêt pour une nouvelle mission", vehicleId);
     }
 }

@@ -5,6 +5,7 @@ import cpe.baldespompiers.model.dto.VehicleDto;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.List;
 
@@ -62,10 +63,14 @@ public class VehicleClient {
     /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */
     public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
         return webClient.put()
-                .uri("/vehicle/move/{teamuuid}/{id}", teamUuid, vehicleId)  // fix: {team uuid} → {teamuuid}
+                .uri("/vehicle/move/{teamuuid}/{id}", teamUuid, vehicleId)
                 .bodyValue(destination)
-                .retrieve()
-                .bodyToMono(VehicleDto.class)
+                .exchangeToMono(response -> {
+                    if (response.statusCode().value() == 409) { //probleme de vitesse avec OSRM
+                        return response.releaseBody().then(Mono.empty());
+                    }
+                    return response.bodyToMono(VehicleDto.class);
+                })
                 .block();
     }
 

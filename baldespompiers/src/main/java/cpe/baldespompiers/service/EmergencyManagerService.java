@@ -43,10 +43,10 @@ public class EmergencyManagerService {
     private String teamUuid;
 
     // Seuil absolu : en dessous, le véhicule est exclu du dispatch
-    @Value("${dispatch.min.fuel:5.0}")
+    @Value("${dispatch.min.fuel:10.0}")
     private float minFuel;
 
-    @Value("${dispatch.min.liquid:5.0}")
+    @Value("${dispatch.min.liquid:10.0}")
     private float minLiquid;
 
     @Value("${dispatch.min.crew:1}")
@@ -60,6 +60,9 @@ public class EmergencyManagerService {
     @Value("${dispatch.ready.liquid:40.0}")
     private float readyLiquid;
 
+    @Value("${dispatch.ready.crew:3}")
+    private int readyCrew;
+
     public EmergencyManagerService(VehicleMovementThread vehicleMovementThread) {
         this.vehicleMovementThread = vehicleMovementThread;
     }
@@ -68,7 +71,8 @@ public class EmergencyManagerService {
 
     /** Vrai si le liquide du véhicule est efficace contre ce type de feu (efficacité > 10 %). */
     private boolean isLiquidCompatible(LiquidType liquid, String fireType) {
-        if (liquid == null || fireType == null) return false;
+        if (liquid == null || fireType == null) return false; // données manquantes → incompatible par sécurité
+        // Un seuil de 10 % évite d'envoyer un véhicule totalement inefficace (ex. eau sur feu chimique)
         return liquid.getEfficiency(fireType) > 0.1;
     }
 
@@ -81,9 +85,12 @@ public class EmergencyManagerService {
      * les petites différences de ressources, mais pas sur la taille de l'équipage.
      */
     private double vehicleScore(VehicleDto v, FireDto fire) {
+        // Récupère l'efficacité du liquide contre ce type de feu (entre 0.0 et 1.0), 0 si pas de liquide
         double efficiency = (v.getLiquidType() != null)
                 ? v.getLiquidType().getEfficiency(fire.getType())
                 : 0.0;
+        // Score total = compatibilité liquide (priorité haute) + taille équipage + quantité de ressources restantes
+        // Le ×50 sur l'efficacité garantit qu'un véhicule compatible bat toujours un véhicule incompatible bien chargé
         return efficiency * 50.0 + v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
     }
 
@@ -92,7 +99,7 @@ public class EmergencyManagerService {
     /** Véhicules libres, au-dessus des seuils minimaux et compatibles avec le type de feu. */
     private Stream<VehicleDto> candidates(List<VehicleDto> vehicles, FireDto fire) {
         return vehicles.stream()
-                .filter(v -> !vehicleStates.containsKey(v.getId()))
+                .filter(v -> !vehicleStates.containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
                 .filter(v -> v.getFuel() >= minFuel)
@@ -102,48 +109,71 @@ public class EmergencyManagerService {
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */
     private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles, FireDto fire) {
         return candidates(vehicles, fire)
+                .filter(v -> !vehicleStates.containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
+                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getFuel() >= readyFuel)
-                .filter(v -> v.getLiquidQuantity() >= readyLiquid);
+                .filter(v -> v.getLiquidQuantity() >= readyLiquid)
+                .filter(v -> v.getCrewMember() >= readyCrew);
     }
 
     // ── Dispatch ───────────────────────────────────────────────────────────────
 
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
+        // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
+        // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)
         List<FireDto> sortedFires = fires.stream()
-                .sorted(Comparator.comparingDouble(FireDto::getIntensity).reversed())
+                .sorted(Comparator
+                        // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
+                .comparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
+                // 2. À égalité de compatibilité, les plus intenses d'abord
+                .thenComparingDouble(f -> -f.getIntensity())) // -f pour un tri décroissant
                 .toList();
 
         for (FireDto fire : sortedFires) {
-            if (assignedFires.contains(fire.getId())) continue;
+            if (assignedFires.contains(fire.getId())) continue; // un véhicule est déjà en route → on passe
 
-            // Tier 1 : véhicule "prêt" et compatible → meilleur score
+            // Tier 1 : cherche un véhicule avec ressources confortables (fuel ≥ readyFuel, liq ≥ readyLiquid)
             Optional<VehicleDto> ready = best_candidates(vehicles, fire)
-                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
+                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire))); // prend le meilleur score
 
             if (ready.isPresent()) {
-                dispatch(ready.get(), fire);
-                continue;
+                dispatch(ready.get(), fire); // envoie le meilleur véhicule prêt
+                continue; // inutile d'examiner le Tier 2 pour ce feu
             }
 
-            // Tier 2 : aucun véhicule "prêt" → fallback sur tout candidat compatible au-dessus du minimum
+            // Tier 2 : aucun véhicule "prêt" → envoie le moins mauvais disponible au-dessus des seuils minimaux
             candidates(vehicles, fire)
                     .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)))
-                    .ifPresentOrElse(
+                    .ifPresent(
                             vehicle -> {
-                                log.warn("Feu #{} — aucun véhicule prêt (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
+                                log.warn("Feu #{} — aucun véhicule prêt complètement (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
                                         fire.getId(), readyFuel, readyLiquid,
                                         vehicle.getId(), vehicle.getFuel(), vehicle.getLiquidQuantity());
                                 dispatch(vehicle, fire);
-                            },
-                            () -> log.warn("Feu #{} — aucun véhicule disponible (tous occupés, sous le seuil minimum ou liquide incompatible)", fire.getId())
+                            }
+
+//                        // IDENTIFIER LA RAISON DE PK ON NE PEUT PAS TRAITER CE FEU !!!
+//                            () -> {
+//                        boolean allBusy = vehicles.stream().allMatch(v -> vehicleStates.containsKey(v.getId())); //.allMatch retourne true su TOUS les véhicules sont occupés (présents dans vehicleStates)
+//                        boolean incompatible = vehicles.stream()
+//                                .filter(v -> !vehicleStates.containsKey(v.getId()))
+//                                .noneMatch(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())); // .noneMatch() retourne TRUE si aucun véhicules n'est compatible (filtré pour ne garder que les véhicules libres)
+//                        if (allBusy)
+//                            log.warn("Feu #{} (type={}) — tous les véhicules sont occupés", fire.getId(), fire.getType());
+//                        else if (incompatible)
+//                            log.warn("Feu #{} (type={}) — aucun véhicule avec liquide compatible", fire.getId(), fire.getType());
+//                        else
+//                            log.warn("Feu #{} (type={}) — tous les véhicules compatibles sont sous le seuil minimum", fire.getId(), fire.getType());
+//                    }
                     );
         }
     }
 
     public void dispatch(VehicleDto vehicle, FireDto fire) {
         log.info("Dispatch véhicule {} → feu #{} (intensité={})", vehicle.getId(), fire.getId(), fire.getIntensity());
-        vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
-        assignedFires.add(fire.getId());
+        vehicleStates.put(vehicle.getId(), VehicleState.MOVING); // réserve le véhicule : il ne sera plus proposé à d'autres feux
+        assignedFires.add(fire.getId());                          // réserve le feu : aucun autre véhicule ne sera dispatchés dessus
+        // Lance le déplacement dans un thread dédié (@Async) ; onArrived sera appelé à la fin de la mission
         vehicleMovementThread.moveVehicle(
                 vehicle,
                 fire,
@@ -152,9 +182,38 @@ public class EmergencyManagerService {
         );
     }
 
+    // Appelée à la fin de chaque mission (après retour caserne + recharge), libère le véhicule pour un nouveau dispatch
     public void onArrived(Integer vehicleId, Integer fireId) {
         log.info("Véhicule {} libéré", vehicleId);
-        vehicleStates.remove(vehicleId);
+        vehicleStates.remove(vehicleId); // le véhicule est à nouveau disponible
+        assignedFires.remove(fireId);    // le feu est retiré des assignations (éteint ou abandonné)
+    }
+
+    /**
+     * Cherche le meilleur feu non-assigné compatible avec ce véhicule pour un départ direct
+     * (sans repassage par la caserne). Réutilise isLiquidCompatible et vehicleScore.
+     */
+    public Optional<FireDto> findNextFireForVehicle(VehicleDto vehicle, List<FireDto> activeFires) {
+        return activeFires.stream()
+                .filter(f -> f.getIntensity() > 0)                                   // ignore les feux déjà éteints
+                .filter(f -> !assignedFires.contains(f.getId()))                     // ignore les feux déjà pris
+                .filter(f -> isLiquidCompatible(vehicle.getLiquidType(), f.getType())) // liquide efficace requis
+                .max(Comparator.comparingDouble(f -> vehicleScore(vehicle, f)));      // prend le feu pour lequel ce véhicule est le plus efficace
+    }
+
+    /**
+     * Transition directe d'un feu à un autre (sans caserne) :
+     * libère l'ancien feu dans assignedFires, prend le nouveau, repasse en MOVING.
+     */
+    public void claimFire(Integer vehicleId, Integer oldFireId, Integer newFireId) {
+        assignedFires.remove(oldFireId); // libère l'ancien feu immédiatement (un autre véhicule pourra le récupérer)
+        assignedFires.add(newFireId);    // réserve le nouveau avant même de partir (évite un double dispatch)
+        vehicleStates.put(vehicleId, VehicleState.MOVING); // repasse en déplacement (il n'est plus ON_FIRE)
+        log.info("Véhicule {} : transition feu #{} → feu #{} (sans caserne)", vehicleId, oldFireId, newFireId);
+    }
+
+    /** Libère uniquement l'assignation du feu (appel du finally dans moveVehicle), sans changer l'état du véhicule. */
+    public void releaseFire(Integer fireId) {
         assignedFires.remove(fireId);
     }
 

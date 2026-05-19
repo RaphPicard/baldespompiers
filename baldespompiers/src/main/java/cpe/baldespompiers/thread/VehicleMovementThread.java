@@ -104,7 +104,6 @@ public class VehicleMovementThread {
     private static final class InsufficientResourcesException extends RuntimeException {
         InsufficientResourcesException(String msg) { super(msg, null, true, false); }
     }
-
     // Signal de reprise de mission : levée pendant un retour caserne si recallMode passe à OFF
     private static final class ResumeMissionException extends RuntimeException {
         ResumeMissionException(String msg) { super(msg, null, true, false); }
@@ -116,6 +115,8 @@ public class VehicleMovementThread {
         TO_FACILITY,  // recallMode=false → abandonne le retour, libère pour redispatch
         MANUAL        // ignore recallMode (déplacement libre)
     }
+
+    // ── Après exctinction d'un feu ? ───────────────────────────────────────────
     private boolean vehicleNeedsRecharge(VehicleDto v) {
         if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
         // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
@@ -373,12 +374,12 @@ public class VehicleMovementThread {
      */
     private void moveToPoint(double fromLon, double fromLat,
                              double toLon, double toLat,
-                             Integer vehicleId, long vehicleDelay,
-                             MovePhase phase) throws InterruptedException {
+                             Integer vehicleId, long vehicleDelay, MovePhase phase) throws InterruptedException {
         double currentLon = fromLon;
         double currentLat = fromLat;
 
         while (true) {
+
             // Check du mode rappel (global ou individuel) à chaque pas → abandonne immédiatement
             if (phase == MovePhase.TO_FIRE && emergencyManagerService.isRecallRequested(vehicleId))
                 throw new InsufficientResourcesException("rappel actif — abandon trajet vers feu");
@@ -386,6 +387,7 @@ public class VehicleMovementThread {
             if (phase == MovePhase.TO_FACILITY && !emergencyManagerService.isRecallMode()
                     && !emergencyManagerService.isRecallRequested(vehicleId))
                 throw new ResumeMissionException("rappel terminé — abandon retour caserne");
+
 
             // Calcule le vecteur restant à parcourir et sa longueur (en degrés)
             double dLon = toLon - currentLon;
@@ -432,10 +434,13 @@ public class VehicleMovementThread {
      */
     private void waitForFireOut(Integer fireId, Integer vehicleId) throws InterruptedException {
         while (true) {
+
             // Mode rappel (global ou individuel) : abandonne immédiatement → catch → retour caserne
             if (emergencyManagerService.isRecallRequested(vehicleId)) {
                 throw new InsufficientResourcesException("rappel actif");
             }
+
+
             FireDto current = fireClient.getFireById(fireId);
             if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0) ou disparu → on sort
 

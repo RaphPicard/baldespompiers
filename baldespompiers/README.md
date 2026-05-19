@@ -278,9 +278,9 @@ cpefighter/
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
 - faire le polling pour récupérer les feux et les événements (EventPollerThread) 
 - Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**)
-- Prendre en compte le nb de waypoints (distance) pour le score (pour l'instant c'est juste equipage + ressources + efficiency)
+- Prendre en compte le nb de waypoints (distance) pour le score (pour l'instant c'est juste equipage + ressources + efficiency) ==> **FAIT** mais ducoup c'est en dépit de l'intensité du feu ?
 - actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
 - Est-ce qu'on gagne plus de points en éteignant complètement un feu (dernier PV) ou juste en réduisant son intensité ? (si oui : privilégier les feux de faible intensité et renvoyer un autre camion finir le travail d'un véhicule qui abandonne par manque de ressources)
 - STARTEGIE : Laisser les feux à environ 3 ou 4 d'intensité, les considérer comme éteint et laisser les autres equipes aller les finir pour qu'elles perdent du temps (à patcher si toutes les equipes trient les feux par ordre d'intensité décroissante)
 - Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition
-- - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel
+- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel

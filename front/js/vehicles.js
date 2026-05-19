@@ -16,8 +16,29 @@ async function loadVehicles() {
         <p class="text-sm text-gray-500">Liquide : ${v.liquidType} (${v.liquidQuantity}L)</p>
         <p class="text-sm text-gray-500">Carburant : ${v.fuel}L — Équipage : ${v.crewMember}</p>
       </div>
+      <button onclick="removeVehicle(${v.id})" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded px-3 py-1 text-sm">
+        🗑 Supprimer
+      </button>
     </div>
   `).join('');
+}
+
+async function removeVehicle(id) {
+  if (!confirm(`Supprimer le véhicule #${id} ?\n\n⚠️ Si le véhicule n'est pas à la caserne : pénalité -500 points !`)) {
+    return;
+  }
+
+  try {
+    const res = await deleteVehicle(id);
+    if (res.data === false) {
+      alert(`❌ Suppression refusée pour #${id} (véhicule en mission)`);
+    } else {
+      loadVehicles();
+    }
+  } catch (err) {
+    alert(`❌ Erreur lors de la suppression de #${id}`);
+    console.error(err);
+  }
 }
 
 async function submitCreateVehicle() {

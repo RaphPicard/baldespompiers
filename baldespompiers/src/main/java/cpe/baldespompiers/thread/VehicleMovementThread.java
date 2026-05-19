@@ -104,6 +104,7 @@ public class VehicleMovementThread {
     private static final class InsufficientResourcesException extends RuntimeException {
         InsufficientResourcesException(String msg) { super(msg, null, true, false); }
     }
+    // ── Après exctinction d'un feu ? ───────────────────────────────────────────
     private boolean vehicleNeedsRecharge(VehicleDto v) {
         if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
         // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur

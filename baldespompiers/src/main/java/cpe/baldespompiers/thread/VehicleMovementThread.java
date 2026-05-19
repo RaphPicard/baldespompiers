@@ -11,6 +11,7 @@ import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.service.EmergencyManagerService;
+import cpe.baldespompiers.service.FireService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +48,7 @@ public class VehicleMovementThread {
     private final FireClient fireClient;
     private final FacilityClient facilityClient;
     private final EmergencyManagerService emergencyManagerService;
+    private final FireService fireService;
 
     @Value("${simulator.team-uuid}")
     private String teamUuid;
@@ -66,6 +68,11 @@ public class VehicleMovementThread {
     private long fireCheckDelayMs;
 
     // Seuils d'abandon de mission (mêmes valeurs que dans EmergencyManagerService)
+    @Value("${dispatch.give_up.fuel:10.0}")
+    private float giveUpFuel;
+    @Value("${dispatch.give_up.liquid:0.0}")
+    private float giveUpLiquid;
+
     @Value("${dispatch.min.fuel:10.0}")
     private float minFuel;
 
@@ -83,17 +90,24 @@ public class VehicleMovementThread {
     public VehicleMovementThread(VehicleClient vehicleClient,
                                  FireClient fireClient,
                                  FacilityClient facilityClient,
-                                 @Lazy EmergencyManagerService emergencyManagerService) {
+                                 @Lazy EmergencyManagerService emergencyManagerService, // Lazy pour éviter la dépendance circulaire (EmergencyManagerService dépend de VehicleMovementThread)
+                                 @Lazy FireService fireService) { // Lazy va faire en sorte que le bean FireService ne soit injecté que lorsqu'il est réellement utilisé, évitant ainsi la boucle de dépendance au démarrage de l'application
         this.vehicleClient = vehicleClient;
         this.fireClient = fireClient;
         this.facilityClient = facilityClient;
         this.emergencyManagerService = emergencyManagerService;
+        this.fireService = fireService;
     }
 
     // ── Signal d'abandon de mission ───────────────────────────────────────────
     // RuntimeException sans stack trace pour ne pas polluer les logs.
     private static final class InsufficientResourcesException extends RuntimeException {
         InsufficientResourcesException(String msg) { super(msg, null, true, false); }
+    }
+    private boolean vehicleNeedsRecharge(VehicleDto v) {
+        if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
+        // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
+        return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquid;
     }
 
     // ── Point d'entrée principal ───────────────────────────────────────────────
@@ -129,7 +143,7 @@ public class VehicleMovementThread {
 
                 // Ressources suffisantes : cherche un autre feu à traiter directement, sans passer par la caserne
                 List<FireDto> activeFires = fireClient.getAllFires();
-                Optional<FireDto> next = emergencyManagerService.findNextFireForVehicle(
+                Optional<FireDto> next = fireService.findNextFireForVehicle(
                         refreshed, activeFires != null ? activeFires : List.of());
 
                 if (next.isEmpty()) {
@@ -142,7 +156,7 @@ public class VehicleMovementThread {
                 log.info("Véhicule {} : ressources suffisantes, direct sur feu #{} (sans caserne)",
                         vehicle.getId(), nextFire.getId());
                 // Réserve le nouveau feu atomiquement et libère l'ancien pour les autres véhicules
-                emergencyManagerService.claimFire(vehicle.getId(), currentFire.getId(), nextFire.getId());
+                fireService.claimFire(vehicle.getId(), currentFire.getId(), nextFire.getId());
                 currentFire = nextFire; // reboucle sur la phase 1 avec le nouveau feu
             }
 
@@ -159,7 +173,7 @@ public class VehicleMovementThread {
 
         } finally {
             try {
-                emergencyManagerService.releaseFire(currentFire.getId());
+                fireService.releaseFire(currentFire.getId());
                 if (needsRecharge) {
                     returnToFacility(vehicle);
                     waitForRecharge(vehicle.getId());
@@ -169,12 +183,6 @@ public class VehicleMovementThread {
             }
             if (onDone != null) onDone.run();
         }
-    }
-
-    private boolean vehicleNeedsRecharge(VehicleDto v) {
-        if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
-        // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
-        return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquid;
     }
 
     /**
@@ -312,6 +320,7 @@ public class VehicleMovementThread {
             double[] last = waypoints.get(waypoints.size() - 1);
             double dLon = targetLon - last[0];
             double dLat = targetLat - last[1];
+            // peut etre : enlever le if et mettre dans tous les cas moveToPoint
             if (Math.sqrt(dLon * dLon + dLat * dLat) > stepSize) {
                 moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay);
             }
@@ -372,7 +381,7 @@ public class VehicleMovementThread {
             Thread.sleep(vehicleDelay); // attend avant le prochain pas (simule la vitesse du véhicule)
 
             // Coupe la mission si le carburant est trop bas pour continuer à avancer
-            if (updated != null && updated.getFuelQuantity() < minFuel)
+            if (updated != null && updated.getFuelQuantity() < giveUpFuel)
                 throw new InsufficientResourcesException("carburant insuffisant (fuel=" + updated.getFuelQuantity() + ")");
         }
     }
@@ -400,7 +409,7 @@ public class VehicleMovementThread {
             VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
             if (vehicle != null && vehicle.getType() != null
                     && vehicle.getType().getLiquidCapacity() > 0
-                    && vehicle.getLiquidQuantity() < minLiquid)
+                    && vehicle.getLiquidQuantity() < giveUpLiquid)
                 // Plus assez de liquide pour continuer → abandonne la mission et rentre à la caserne
                 throw new InsufficientResourcesException("liquide insuffisant (liquid=" + vehicle.getLiquidQuantity() + ")");
 

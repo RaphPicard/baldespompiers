@@ -133,7 +133,7 @@ public class EmergencyManagerService {
         // Score total = compatibilité liquide (priorité haute) + taille équipage + quantité de ressources restantes
         // Le ×50 sur l'efficacité garantit qu'un véhicule compatible bat toujours un véhicule incompatible bien chargé
         return efficiency * efficiencyWeight             // 0–50  (priorité absolue : liquide compatible ?)
-                //+ v.getCrewMember() * crewMemberWeight // INUTILE CAR TOUS LES VEHICULES SERONT PLEINS  // 0–40  (équipage 1–8 pompiers)
+                //+ v.getCrewMember() * crewMemberWeight // INUTILE CAR TOUS LES VEHICULES SERONT PLEINS  // 0–40  (équipage 1–8 pompiers) // a mettre en ratio !!!
                 - distVehicleFire * distanceWeight       // 0–20  (carburant suffisant ?)
                 + liquidRatio * liquidWeight             // 0–20  (réservoir plein ?)
                 + fuelRatio * fuelWeight;                // 0–-45 (0.15° ≈ 16 km max à Lyon)
@@ -147,8 +147,8 @@ public class EmergencyManagerService {
                 .filter(v -> !vehicleStates.containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuel() >= minFuel)
-                .filter(v -> v.getLiquidQuantity() >= 100);
+                .filter(v -> v.getFuelQuantity() >= minFuel)
+                .filter(v -> v.getLiquidQuantity() >= minLiquid);
     }
 
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */
@@ -156,7 +156,7 @@ public class EmergencyManagerService {
         return candidates(vehicles, fire)
                 .filter(v -> !vehicleStates.containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
-                .filter(v -> v.getFuel() >= readyFuel)
+                .filter(v -> v.getFuelQuantity() >= readyFuel)
                 .filter(v -> v.getLiquidQuantity() >= readyLiquid)
                 .filter(v -> v.getCrewMember() >= readyCrew);
     }
@@ -193,7 +193,7 @@ public class EmergencyManagerService {
                             vehicle -> {
                                 log.warn("Feu #{} — aucun véhicule prêt complètement (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
                                         fire.getId(), readyFuel, readyLiquid,
-                                        vehicle.getId(), vehicle.getFuel(), vehicle.getLiquidQuantity());
+                                        vehicle.getId(), vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
                                 dispatch(vehicle, fire);
                             }
 

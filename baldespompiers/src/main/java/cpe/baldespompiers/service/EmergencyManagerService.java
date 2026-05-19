@@ -148,7 +148,7 @@ public class EmergencyManagerService {
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
                 .filter(v -> v.getFuel() >= minFuel)
-                .filter(v -> v.getLiquidQuantity() >= minLiquid);
+                .filter(v -> v.getLiquidQuantity() >= 100);
     }
 
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */

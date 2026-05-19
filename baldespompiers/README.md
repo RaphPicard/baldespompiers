@@ -284,4 +284,3 @@ cpefighter/
 - STARTEGIE : Laisser les feux à environ 3 ou 4 d'intensité, les considérer comme éteint et laisser les autres equipes aller les finir pour qu'elles perdent du temps (à patcher si toutes les equipes trient les feux par ordre d'intensité décroissante)
 - Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel
-- 

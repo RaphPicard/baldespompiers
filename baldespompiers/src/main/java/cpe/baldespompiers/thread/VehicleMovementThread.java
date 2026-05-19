@@ -104,6 +104,18 @@ public class VehicleMovementThread {
     private static final class InsufficientResourcesException extends RuntimeException {
         InsufficientResourcesException(String msg) { super(msg, null, true, false); }
     }
+    // Signal de reprise de mission : levée pendant un retour caserne si recallMode passe à OFF
+    private static final class ResumeMissionException extends RuntimeException {
+        ResumeMissionException(String msg) { super(msg, null, true, false); }
+    }
+
+    /** Contexte d'un déplacement : utilisé pour interpréter l'état recallMode. */
+    public enum MovePhase {
+        TO_FIRE,      // recallMode=true → abandonne, retourne caserne
+        TO_FACILITY,  // recallMode=false → abandonne le retour, libère pour redispatch
+        MANUAL        // ignore recallMode (déplacement libre)
+    }
+
     // ── Après exctinction d'un feu ? ───────────────────────────────────────────
     private boolean vehicleNeedsRecharge(VehicleDto v) {
         if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
@@ -120,7 +132,7 @@ public class VehicleMovementThread {
         try {
             while (true) {
                 // Phase 1 : déplacer le véhicule vers le feu (mode téléport, ligne droite ou route selon config)
-                movement_type(vehicle, teamUuid, currentFire.getLon(), currentFire.getLat());
+                movement_type(vehicle, teamUuid, currentFire.getLon(), currentFire.getLat(), MovePhase.TO_FIRE);
                 // Met à jour la position locale pour que les prochains calculs de distance partent du bon endroit
                 vehicle.setLon(currentFire.getLon());   // fix d'un bug... (à enlever ?)
                 vehicle.setLat(currentFire.getLat());
@@ -141,6 +153,9 @@ public class VehicleMovementThread {
 
                 // Si les ressources sont trop basses, le véhicule doit rentrer à la caserne (break --> finally) se recharger
                 if (vehicleNeedsRecharge(refreshed)) { needsRecharge = true; break; } //break sort de la boucle While(true) et va au error/exeption et finally !!!
+
+                // Mode rappel (global ou individuel) : retour immédiat à la caserne, même si ressources OK
+                if (emergencyManagerService.isRecallRequested(vehicle.getId())) { needsRecharge = true; break; }
 
                 // Ressources suffisantes : cherche un autre feu à traiter directement, sans passer par la caserne
                 List<FireDto> activeFires = fireClient.getAllFires();
@@ -176,8 +191,14 @@ public class VehicleMovementThread {
             try {
                 fireService.releaseFire(currentFire.getId());
                 if (needsRecharge) {
-                    returnToFacility(vehicle);
-                    waitForRecharge(vehicle.getId());
+                    try {
+                        returnToFacility(vehicle);
+                        waitForRecharge(vehicle.getId());
+                    } catch (ResumeMissionException e) {
+                        // recallMode désactivé en cours de retour → on libère le véhicule
+                        // (le prochain dispatch le récupèrera, qu'il soit ou non à la caserne)
+                        log.info("Véhicule {} : retour interrompu pour reprise mission", vehicle.getId());
+                    }
                 }
             } catch (Exception e) {
                 log.error("[Move] Erreur retour/recharge véhicule {} : {}", vehicle.getId(), e.getMessage());
@@ -194,7 +215,7 @@ public class VehicleMovementThread {
     @Async("vehicleMovementExecutor")
     public void moveTo(VehicleDto vehicle, double lon, double lat) {
         try {
-            movement_type(vehicle, teamUuid, lon, lat);
+            movement_type(vehicle, teamUuid, lon, lat, MovePhase.MANUAL);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Déplacement interrompu pour véhicule {}", vehicle.getId());
@@ -205,15 +226,15 @@ public class VehicleMovementThread {
 
     // ── Sélection du mode de déplacement ──────────────────────────────────────
 
-    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat)
+    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat, MovePhase phase)
             throws InterruptedException, IOException {
         long vehicleDelay = computeStepDelay(vehicle.getType());
 
         if ("straight".equals(movementMode)) {
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay, phase);
 
         } else if ("road".equals(movementMode)) {
-            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay);
+            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay, phase);
 
         } else {
             teleport(vehicle.getId(), lon, lat);
@@ -250,7 +271,7 @@ public class VehicleMovementThread {
      */
     private void moveFollower(VehicleDto vehicle,
                               double targetLon, double targetLat,
-                              String teamUuid, long vehicleDelay)
+                              String teamUuid, long vehicleDelay, MovePhase phase)
             throws IOException, InterruptedException {
 
         // Construit l'URL OSRM : "lon_départ,lat_départ;lon_cible,lat_cible" avec géométrie complète
@@ -274,7 +295,7 @@ public class VehicleMovementThread {
         if (response.statusCode() != 200) {
             // OSRM injoignable ou surchargé → on déplace quand même le véhicule en ligne droite
             System.err.println("[OSRM] HTTP Error : " + response.statusCode() + " — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
             return;
         }
 
@@ -283,7 +304,7 @@ public class VehicleMovementThread {
         if (!"Ok".equals(root.path("code").asText())) {
             // OSRM n'a pas trouvé de route (feu hors réseau routier, zone isolée…) → fallback ligne droite
             System.err.println("[OSRM] Invalid response : " + root.path("code").asText() + " — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
             return;
         }
 
@@ -296,7 +317,7 @@ public class VehicleMovementThread {
         if (coordinates == null || !coordinates.isArray()) {
             // Réponse malformée → fallback ligne droite pour ne pas bloquer le véhicule
             System.err.println("[OSRM] No coordinates found — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
             return;
         }
 
@@ -312,7 +333,7 @@ public class VehicleMovementThread {
         for (int i = 1; i < waypoints.size(); i++) {
             double[] from = waypoints.get(i - 1);
             double[] to   = waypoints.get(i);
-            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay);
+            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay, phase);
         }
 
         // OSRM s'arrête à la route la plus proche. Si le feu est en dehors du réseau (forêt, champ…),
@@ -323,7 +344,7 @@ public class VehicleMovementThread {
             double dLat = targetLat - last[1];
             // peut etre : enlever le if et mettre dans tous les cas moveToPoint
             if (Math.sqrt(dLon * dLon + dLat * dLat) > stepSize) {
-                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay);
+                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
             }
         }
 
@@ -353,11 +374,21 @@ public class VehicleMovementThread {
      */
     private void moveToPoint(double fromLon, double fromLat,
                              double toLon, double toLat,
-                             Integer vehicleId, long vehicleDelay) throws InterruptedException {
+                             Integer vehicleId, long vehicleDelay, MovePhase phase) throws InterruptedException {
         double currentLon = fromLon;
         double currentLat = fromLat;
 
         while (true) {
+
+            // Check du mode rappel (global ou individuel) à chaque pas → abandonne immédiatement
+            if (phase == MovePhase.TO_FIRE && emergencyManagerService.isRecallRequested(vehicleId))
+                throw new InsufficientResourcesException("rappel actif — abandon trajet vers feu");
+            // Retour caserne : interrompu UNIQUEMENT si recallMode global devient OFF (les rappels individuels doivent finir leur trajet retour)
+            if (phase == MovePhase.TO_FACILITY && !emergencyManagerService.isRecallMode()
+                    && !emergencyManagerService.isRecallRequested(vehicleId))
+                throw new ResumeMissionException("rappel terminé — abandon retour caserne");
+
+
             // Calcule le vecteur restant à parcourir et sa longueur (en degrés)
             double dLon = toLon - currentLon;
             double dLat = toLat - currentLat;
@@ -403,6 +434,13 @@ public class VehicleMovementThread {
      */
     private void waitForFireOut(Integer fireId, Integer vehicleId) throws InterruptedException {
         while (true) {
+
+            // Mode rappel (global ou individuel) : abandonne immédiatement → catch → retour caserne
+            if (emergencyManagerService.isRecallRequested(vehicleId)) {
+                throw new InsufficientResourcesException("rappel actif");
+            }
+
+
             FireDto current = fireClient.getFireById(fireId);
             if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0) ou disparu → on sort
 
@@ -432,7 +470,7 @@ public class VehicleMovementThread {
         }
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
-        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat());
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), MovePhase.TO_FACILITY);
     }
 
     // ── Attente du rechargement à la caserne ──────────────────────────────────

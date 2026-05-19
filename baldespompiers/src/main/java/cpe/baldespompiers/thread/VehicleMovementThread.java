@@ -172,7 +172,7 @@ public class VehicleMovementThread {
     }
 
     private boolean vehicleNeedsRecharge(VehicleDto v) {
-        if (v.getFuel() < minFuel) return true; // carburant trop bas pour une nouvelle mission
+        if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
         // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
         return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquid;
     }
@@ -355,8 +355,8 @@ public class VehicleMovementThread {
             Thread.sleep(vehicleDelay); // attend avant le prochain pas (simule la vitesse du véhicule)
 
             // Coupe la mission si le carburant est trop bas pour continuer à avancer
-            if (updated != null && updated.getFuel() < minFuel)
-                throw new InsufficientResourcesException("carburant insuffisant (fuel=" + updated.getFuel() + ")");
+            if (updated != null && updated.getFuelQuantity() < minFuel)
+                throw new InsufficientResourcesException("carburant insuffisant (fuel=" + updated.getFuelQuantity() + ")");
         }
     }
 
@@ -420,21 +420,21 @@ public class VehicleMovementThread {
         if (vehicle == null || vehicle.getType() == null) return;
 
         // Détermine ce qui manque : carburant, liquide, ou les deux
-        boolean needsFuel   = vehicle.getFuel() < readyFuel;
+        boolean needsFuel   = vehicle.getFuelQuantity() < readyFuel;
         boolean needsLiquid = vehicle.getType().getLiquidCapacity() > 0 && vehicle.getLiquidQuantity() < readyLiquid;
         if (!needsFuel && !needsLiquid) return; // déjà à niveau → pas besoin d'attendre
 
-        log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})", vehicleId, vehicle.getFuel(), vehicle.getLiquidQuantity());
+        log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})", vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
 
         while (true) {
             Thread.sleep(fireCheckDelayMs); // le rechargement est progressif, on recheck régulièrement
             vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
             if (vehicle == null) break;
-            boolean fuelOk   = vehicle.getFuel()  >= readyFuel;
+            boolean fuelOk   = vehicle.getFuelQuantity()  >= readyFuel;
             // Les ambulances (liquidCapacity == 0) sont toujours considérées "ok" côté liquide
             boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= readyLiquid;
             if (fuelOk && liquidOk) break; // les deux ressources sont au niveau requis → le véhicule est prêt
-            log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, vehicle.getFuel(), vehicle.getLiquidQuantity());
+            log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
         }
         log.info("Véhicule {} rechargé — prêt pour une nouvelle mission", vehicleId);
     }

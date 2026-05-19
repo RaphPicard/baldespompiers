@@ -32,6 +32,30 @@ tp.cpe.fr:8083 ← ← simulateur (polling, dispatch)
 **Clients** = appels au simulateur externe.
 **Services** = logique métier (affectation, cache, score).
 
+### Flux détaillé des données
+
+```
+Simulateur (tp.cpe.fr:8083)
+        ↑↓ HTTP
+[FireClient]  [VehicleClient]  [RpEventClient]  [FacilityClient]
+         ↘          ↓
+      [EventPollerThread]  ←  @Scheduled (toutes les 5s)
+           ↙              ↘
+   cachedFires/Vehicles    [EmergencyManagerService.dispatchAll()]
+           ↓                         ↓  (utilise les Types pour décider)
+   [FireRestCrt]           [VehicleMovementThread]
+       ↓                         ↓
+  GET /api/fires         [VehicleClient.moveVehicle()]
+       ↓                         ↓
+    [Front]               Simulateur (déplacement)
+```
+
+- Les **Clients** sont les seuls à faire des appels HTTP vers le simulateur.
+- **EventPollerThread** orchestre le timing : il récupère via les clients, met en cache, puis déclenche `EmergencyManagerService`.
+- Les **Controllers** lisent le cache du thread (pas les clients directement) → pas de requête simulateur à chaque appel front.
+- Les **DTOs** (`FireDto`, `VehicleDto`…) transitent sans transformation du simulateur jusqu'au front.
+- Les **Types** (enums `FireType`, `VehicleType`…) portent la sémantique métier utilisée dans `EmergencyManagerService` pour filtrer et scorer.
+
 ---
 
 ## 🔄 Flux complet : créer et dispatcher un véhicule
@@ -233,11 +257,6 @@ cpefighter/
 ---
 ---
 
-# UPDATE DE L'AVANCEMENT (11 mai)
-- Création architecture + README
-- Setup Maven et Spring Boot (pas fini)
-- Implémentation des clients les plus faciles
-
 # FAIT : 
 - Implémenter Auth + JWT + session !!! --> Non car pour les profs
 - Finir les clients --> fait
@@ -251,17 +270,16 @@ cpefighter/
     - Seuils configurables dans `application.properties`
 - **FAIT** : vitesse max prise en compte pour le déplacement — `computeStepDelay` calcule le délai entre chaque pas proportionnellement à `VehicleType.getMaxSpeed()` (référence 110 km/h)
 - **FAIT** : véhicule rentre/recharge à la caserne uniquement si nécessaire — `vehicleNeedsRecharge` vérifie fuel < minFuel ou liquid < minLiquid ; `waitForRecharge` attend les seuils `readyFuel`/`readyLiquid` avant de libérer le véhicule
-- **FAIT** : si le véhicule n'arrive pas au feu par la route (feu en forêt, zone inaccessible…), fallback automatique en ligne droite — les 3 cas d'échec OSRM (HTTP error, code invalide, pas de coordonnées) tombent sur `moveToPoint` ; le tronçon final hors-route est aussi parcouru en ligne droite
+- **FAIT** : si le véhicule n'arrive pas au feu par la route (feu en zone inaccessible…), fallback automatique en ligne droite — les 3 cas d'échec OSRM (HTTP error, code invalide, pas de coordonnées) tombent sur `moveToPoint` ; le tronçon final hors-route est aussi parcouru en ligne droite
 
 
 # @TODO :
-- Regarder pourquoi le PUT vehicle en crée un nouveau (new id auto incrémenté)
-- Pourquoi un type WATER est quand même lent sur un feu typeA ?
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
-- faire le polling pour récupérer les feux et les événements (EventPollerThread) + afficher sur la carte (frontend) ?? --> evan ?
+- faire le polling pour récupérer les feux et les événements (EventPollerThread) 
 - Dispatch pas seulement pour les feux mais aussi pour les events (**road_accident & personal_injury**)
 - Prendre en compte le nb de waypoints (distance) pour le score (pour l'instant c'est juste equipage + ressources + efficiency)
 - actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
 - Est-ce qu'on gagne plus de points en éteignant complètement un feu (dernier PV) ou juste en réduisant son intensité ? (si oui : privilégier les feux de faible intensité et renvoyer un autre camion finir le travail d'un véhicule qui abandonne par manque de ressources)
+- STARTEGIE : Laisser les feux à environ 3 ou 4 d'intensité, les considérer comme éteint et laisser les autres equipes aller les finir pour qu'elles perdent du temps (à patcher si toutes les equipes trient les feux par ordre d'intensité décroissante)
 - Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition

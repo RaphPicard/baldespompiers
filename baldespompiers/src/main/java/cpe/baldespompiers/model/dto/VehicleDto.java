@@ -80,11 +80,11 @@ public class VehicleDto {
     }
 
 
-    public float getFuel() {
+    public float getFuelQuantity() {
         return fuel;
     }
 
-    public void setFuel(float fuel) {
+    public void setFuelQuantity(float fuel) {
         this.fuel = fuel;
     }
 

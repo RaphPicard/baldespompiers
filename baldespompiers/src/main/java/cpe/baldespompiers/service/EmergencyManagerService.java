@@ -63,9 +63,32 @@ public class EmergencyManagerService {
     @Value("${dispatch.ready.crew:3}")
     private int readyCrew;
 
+    // Poids/Importante des paramètres dans le calcul du score des véhicules pour dispatch
+    @Value("${dispatch.efficiency-weight:50.0}")
+    private double efficiencyWeight;
+
+    @Value("${dispatch.crewMember-weight:5.0}")
+    private double crewMemberWeight;
+
+    @Value("${dispatch.liquid-weight:20.0}")
+    private double liquidWeight;
+
+    @Value("${dispatch.fuel-weight:20.0}")
+    private double fuelWeight;
+
+    @Value("${dispatch.distance-weight:300.0}")
+    private double distanceWeight;
+
+
     public EmergencyManagerService(VehicleMovementThread vehicleMovementThread) {
         this.vehicleMovementThread = vehicleMovementThread;
     }
+
+
+
+
+
+
 
     // ── Compatibilité liquide ──────────────────────────────────────────────────
 
@@ -76,11 +99,18 @@ public class EmergencyManagerService {
         return liquid.getEfficiency(fireType) > 0.1;
     }
 
+    // ── Calcul Distance au feu ──────────────────────────────────────────────────
+    private static double calcule_distance(double lat1, double lon1, double lat2, double lon2) {
+        double dLon = lon1 - lon2;
+        double dLat = lat1 - lat2;
+        return Math.sqrt(dLon * dLon + dLat * dLat); // en degré... (à changer ?)
+    }
+
     // ── Score d'aptitude ───────────────────────────────────────────────────────
 
     /**
      * Score d'aptitude d'un véhicule pour un feu donné.
-     * Pondération : compatibilité liquide (×50) > équipage (×10) > liquide + carburant.
+     * Pondération : compatibilité liquide (x50) > équipage (x10) > -distance (x5) > liquide + carburant.
      * Un véhicule parfaitement compatible (efficiency=1.0) gagne +50, ce qui prime sur
      * les petites différences de ressources, mais pas sur la taille de l'équipage.
      */
@@ -89,9 +119,24 @@ public class EmergencyManagerService {
         double efficiency = (v.getLiquidType() != null)
                 ? v.getLiquidType().getEfficiency(fire.getType())
                 : 0.0;
+        // Récupère le ratio du liquide embarqué par rapport à la capacité du véhicule
+        double liquidRatio = (v.getLiquidType() != null && v.getType().getLiquidCapacity() > 0) // pour prendre en compte la quantité de liquide embarquée par rapport à la capacité du véhicule
+                ? v.getLiquidQuantity()  / v.getType().getLiquidCapacity()
+                : 0.0;
+        // Récupère le ratio du carburant embarqué par rapport à la capacité du véhicule
+        double fuelRatio = (v.getType() != null && v.getType().getFuelCapacity() > 0) // pour prendre en compte la quantité d'essence embarquée par rapport à la capacité du véhicule
+                ? v.getFuelQuantity()  / v.getType().getFuelCapacity()
+                : 0.0;
+        // Récupère la distance du véhicule au feu
+        double distVehicleFire = calcule_distance(v.getLat(), v.getLon(), fire.getLat(), fire.getLon());
+
         // Score total = compatibilité liquide (priorité haute) + taille équipage + quantité de ressources restantes
         // Le ×50 sur l'efficacité garantit qu'un véhicule compatible bat toujours un véhicule incompatible bien chargé
-        return efficiency * 50.0 + v.getCrewMember() * 10.0 + v.getLiquidQuantity() + v.getFuel();
+        return efficiency * efficiencyWeight             // 0–50  (priorité absolue : liquide compatible ?)
+                //+ v.getCrewMember() * crewMemberWeight // INUTILE CAR TOUS LES VEHICULES SERONT PLEINS  // 0–40  (équipage 1–8 pompiers)
+                - distVehicleFire * distanceWeight       // 0–20  (carburant suffisant ?)
+                + liquidRatio * liquidWeight             // 0–20  (réservoir plein ?)
+                + fuelRatio * fuelWeight;                // 0–-45 (0.15° ≈ 16 km max à Lyon)
     }
 
     // ── Filtres de candidats ───────────────────────────────────────────────────

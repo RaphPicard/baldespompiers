@@ -16,11 +16,32 @@ async function loadVehicles() {
         <p class="text-sm text-gray-500">Liquide : ${v.liquidType} (${v.liquidQuantity}L)</p>
         <p class="text-sm text-gray-500">Carburant : ${v.fuel}L — Équipage : ${v.crewMember}</p>
       </div>
-      <button onclick="removeVehicle(${v.id})" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded px-3 py-1 text-sm">
-        🗑 Supprimer
-      </button>
+      <div class="flex gap-2">
+        <button onclick="recallOne(${v.id})" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded px-3 py-1 text-sm">
+          🏠 Caserne
+        </button>
+        <button onclick="removeVehicle(${v.id})" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded px-3 py-1 text-sm">
+          🗑 Supprimer
+        </button>
+      </div>
     </div>
   `).join('');
+}
+
+async function recallOne(id) {
+  const FACILITY_LAT = 45.73158119172101;
+  const FACILITY_LON = 4.890602482113532;
+  try {
+    const res = await recallOneVehicle(id);
+    if (!res.data.inMission) {
+      // Véhicule libre → on déclenche aussi un déplacement direct vers la caserne
+      await moveVehicle(id, FACILITY_LAT, FACILITY_LON);
+    }
+    loadVehicles();
+  } catch (err) {
+    alert(`❌ Erreur rappel #${id}`);
+    console.error(err);
+  }
 }
 
 async function removeVehicle(id) {
@@ -62,40 +83,30 @@ async function submitCreateVehicle() {
 }
 
 async function recallAllVehicles() {
-  const FACILITY_LAT = 45.73158119172101;
-  const FACILITY_LON = 4.890602482113532;
   const status = document.getElementById('recall-status');
+  const btn = document.getElementById('recall-btn');
 
-  const res = await getVehicles();
-  const vehicles = res.data;
+  try {
+    // Vérifie l'état courant
+    const stateRes = await getRecallMode();
+    const isRecallActive = stateRes.data.recallMode;
 
-  if (vehicles.length === 0) {
-    status.textContent = 'Aucun véhicule à rappeler';
-    return;
-  }
-
-  let success = 0;
-  let failed = 0;
-  const errors = [];
-
-  for (const v of vehicles) {
-    status.textContent = `⏳ Rappel ${success + failed + 1}/${vehicles.length}...`;
-    try {
-      await moveVehicle(v.id, FACILITY_LAT, FACILITY_LON);
-      success++;
-    } catch (err) {
-      failed++;
-      const code = err.response?.status || '?';
-      errors.push(`#${v.id} (${code})`);
-      console.error(`Erreur véhicule #${v.id}:`, err);
+    if (isRecallActive) {
+      // Désactive → reprend le dispatch normal
+      await resumeDispatch();
+      status.textContent = '▶️ Dispatch repris';
+      if (btn) btn.textContent = '🏠 Rappeler à la caserne';
+    } else {
+      // Active → tous les véhicules en mission rentrent, plus de nouveau dispatch
+      await recallAllVehiclesApi();
+      status.textContent = '🏠 Mode rappel activé — les véhicules rentrent à la caserne';
+      if (btn) btn.textContent = '▶️ Reprendre le dispatch';
     }
-    await new Promise(r => setTimeout(r, 100));
+    loadVehicles();
+  } catch (err) {
+    status.textContent = '❌ Erreur';
+    console.error(err);
   }
-
-  let msg = `✅ ${success}/${vehicles.length} ramené(s)`;
-  if (failed > 0) msg += ` — ❌ Échecs: ${errors.join(', ')}`;
-  status.textContent = msg;
-  loadVehicles();
 }
 
 loadVehicles();

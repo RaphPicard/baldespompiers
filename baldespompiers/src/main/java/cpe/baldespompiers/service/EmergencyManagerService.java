@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Cerveau de l'Emergency Manager.
@@ -38,6 +39,23 @@ public class EmergencyManagerService {
     private final Map<Integer, VehicleState> vehicleStates = new ConcurrentHashMap<>();
     private final Set<Integer> assignedFires = ConcurrentHashMap.newKeySet();
 
+    /** Mode "rappel" : quand actif, aucun nouveau dispatch et les missions en cours abandonnent pour rentrer. */
+    private final AtomicBoolean recallMode = new AtomicBoolean(false);
+
+    /** IDs des véhicules à rappeler individuellement à la caserne (rappel unitaire). */
+    private final Set<Integer> recallRequestedIds = ConcurrentHashMap.newKeySet();
+
+    public boolean isRecallMode() { return recallMode.get(); }
+    public void enableRecallMode() { recallMode.set(true); log.warn("=== MODE RAPPEL ACTIVÉ ==="); }
+    public void disableRecallMode() { recallMode.set(false); log.info("=== Mode rappel désactivé, dispatch repris ==="); }
+
+    public boolean isRecallRequested(Integer vehicleId) {
+        return recallMode.get() || recallRequestedIds.contains(vehicleId);
+    }
+    public void requestRecall(Integer vehicleId) { recallRequestedIds.add(vehicleId); log.info("Rappel individuel demandé : véhicule {}", vehicleId); }
+    public void clearRecallRequest(Integer vehicleId) { recallRequestedIds.remove(vehicleId); }
+    public boolean isVehicleInMission(Integer vehicleId) { return vehicleStates.containsKey(vehicleId); }
+
     @Value("${simulator.team-uuid}")
     private String teamUuid;
 
@@ -50,6 +68,7 @@ public class EmergencyManagerService {
     // ── Dispatch ───────────────────────────────────────────────────────────────
 
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
+        if (recallMode.get()) { log.debug("dispatchAll skip (mode rappel)"); return; }
         fireService.dispatchFires(fires, vehicles);
     }
 
@@ -71,6 +90,7 @@ public class EmergencyManagerService {
         log.info("Véhicule {} libéré", vehicleId);
         vehicleStates.remove(vehicleId); // le véhicule est à nouveau disponible
         assignedFires.remove(fireId);    // le feu est retiré des assignations (éteint ou abandonné)
+        recallRequestedIds.remove(vehicleId); // efface un éventuel rappel individuel en attente
     }
 
     public Map<Integer, VehicleState> getVehicleStates() {

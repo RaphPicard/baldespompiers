@@ -7,3 +7,7 @@ const moveVehicle = (id, lat, lon) => axios.put(`${API}/api/vehicles/${id}/move`
 const createVehicle = (data) => axios.post(`${API}/api/vehicles`, data);
 const updateVehicle = (id, data) => axios.put(`${API}/api/vehicles/${id}`, data);
 const deleteVehicle = (id) => axios.delete(`${API}/api/vehicles/${id}`);
+const recallAllVehiclesApi = () => axios.post(`${API}/api/vehicles/recall-all`);
+const resumeDispatch = () => axios.post(`${API}/api/vehicles/resume`);
+const getRecallMode = () => axios.get(`${API}/api/vehicles/recall-mode`);
+const recallOneVehicle = (id) => axios.post(`${API}/api/vehicles/${id}/recall`);

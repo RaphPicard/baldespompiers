@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/vehicles")
@@ -34,8 +35,9 @@ public class VehicleRestCrt {
     }
 
     @PostMapping
-    public VehicleDto addVehicle(@RequestBody VehicleDto dto) {
-        return vehicleService.addVehicle(dto);
+    public VehicleDto addVehicle(@RequestBody Map<String, Object> body) {
+        // Body en Map pour éviter le bug Jackson 2/3 sur Spring Boot 4 lors de la désérialisation en VehicleDto.
+        return vehicleClient.addVehicleRaw(this.team_uuid, body);
     }
 
     @PutMapping("/{vehicleId}")

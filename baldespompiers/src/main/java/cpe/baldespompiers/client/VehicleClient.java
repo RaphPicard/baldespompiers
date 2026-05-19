@@ -8,6 +8,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class VehicleClient {
@@ -46,6 +47,19 @@ public class VehicleClient {
         return webClient.post()
                 .uri("/vehicle/{teamuuid}", teamUuid)
                 .bodyValue(dto)
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
+    /**
+     * Variante "raw" : envoie le body tel quel (Map) au simulateur.
+     * Contourne le bug de désérialisation Jackson 2/3 sur Spring Boot 4 quand on utilise @RequestBody VehicleDto.
+     */
+    public VehicleDto addVehicleRaw(String teamUuid, Map<String, Object> body) {
+        return webClient.post()
+                .uri("/vehicle/{teamuuid}", teamUuid)
+                .bodyValue(body)
                 .retrieve()
                 .bodyToMono(VehicleDto.class)
                 .block();

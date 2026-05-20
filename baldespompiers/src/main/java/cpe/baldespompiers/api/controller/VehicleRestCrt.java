@@ -71,12 +71,16 @@ public class VehicleRestCrt {
     }
 
     /**
-     * Active le mode rappel : tous les véhicules en mission abandonnent et rentrent,
+     * Active le mode rappel : tous les véhicules en mission abandonnent et rentrent, et même les INACTIFS !!!
      * et aucun nouveau dispatch n'est lancé tant que le mode est actif.
      */
     @PostMapping("/recall-all")
     public Map<String, Object> recallAll() {
         emergencyManagerService.enableRecallMode();
+        vehicleService.getVehiclesForOurTeam().stream()
+                .filter(v -> !emergencyManagerService.isVehicleInMission(v.getId()))
+                .filter(v -> v.getFacilityRefID() != null)
+                .forEach(v -> vehicleMovementThread.recallIdleVehicle(v, null));
         return Map.of("recallMode", true);
     }
 

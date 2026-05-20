@@ -330,6 +330,24 @@ public class VehicleMovementThread {
     }
 
     /**
+     * Rappel d'un véhicule inactif (pas en mission) vers sa caserne.
+     * Utilisé par le recall-all pour rapatrier les véhicules qui n'ont plus de thread actif.
+     */
+    @Async("vehicleMovementExecutor")
+    public void recallIdleVehicle(VehicleDto vehicle, Runnable onDone) {
+        try {
+            returnToFacility(vehicle);
+            waitForRecharge(vehicle.getId());
+        } catch (ResumeMissionException e) {
+            log.info("Véhicule inactif {} : retour annulé (rappel désactivé en cours de route)", vehicle.getId());
+        } catch (Exception e) {
+            log.warn("Rappel véhicule inactif {} : {}", vehicle.getId(), e.getMessage());
+        } finally {
+            if (onDone != null) onDone.run();
+        }
+    }
+
+    /**
      * Déplacement progressif vers une coordonnée arbitraire (sans logique feu/caserne).
      * Wrapper public @Async autour de movement_type, utilisé par /api/vehicles/{id}/move
      * pour respecter la vitesse max du simulateur.

@@ -60,16 +60,6 @@
       </label>
 
       <label class="flex flex-col gap-1 text-sm font-medium">
-        Quantité de liquide (L)
-        <input id="liquidQuantity" type="number" value="1000" class="border rounded p-2"/>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm font-medium">
-        Carburant (L)
-        <input id="fuel" type="number" value="100" class="border rounded p-2"/>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm font-medium">
         Équipage
         <input id="crewMember" type="number" value="4" class="border rounded p-2"/>
       </label>
@@ -83,5 +73,39 @@
   </div>
 
 </div>
+
+<!-- Modal édition véhicule -->
+<div id="edit-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
+  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
+    <h2 class="text-xl font-bold mb-4">Modifier véhicule <span id="edit-vehicle-id"></span></h2>
+    <div class="flex flex-col gap-3">
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Type de liquide
+        <select id="edit-liquidType" class="border rounded p-2">
+          <option>ALL</option>
+          <option>WATER</option>
+          <option>POWDER</option>
+          <option>SPECIAL_POWDER</option>
+          <option>CARBON_DIOXIDE</option>
+          <option>FOAM</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-sm font-medium">
+        Équipage
+        <input id="edit-crewMember" type="number" min="0" class="border rounded p-2"/>
+      </label>
+      <div class="flex gap-2 mt-2">
+        <button onclick="submitEditVehicle()" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded p-2">
+          Sauvegarder
+        </button>
+        <button onclick="closeEditModal()" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded p-2">
+          Annuler
+        </button>
+      </div>
+      <p id="edit-status" class="text-sm text-center text-gray-500"></p>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

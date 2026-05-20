@@ -53,8 +53,9 @@ public class EmergencyManagerService {
         return recallMode.get() || recallRequestedIds.contains(vehicleId); // recallMode mis à True par VehicleRestcrt appelé par l'appui du boutton en html
     }
     public void requestRecall(Integer vehicleId) { recallRequestedIds.add(vehicleId); log.info("Rappel individuel demandé : véhicule {}", vehicleId); }
-    public void clearRecallRequest(Integer vehicleId) { recallRequestedIds.remove(vehicleId); }
+    public void clearRecallRequest(Integer vehicleId) { recallRequestedIds.remove(vehicleId); log.info("Rappel individuel annulé : véhicule {}", vehicleId); }
     public boolean isVehicleInMission(Integer vehicleId) { return vehicleStates.containsKey(vehicleId); }
+    public Set<Integer> getRecallRequestedIds() { return recallRequestedIds; }
 
     @Value("${simulator.team-uuid}")
     private String teamUuid;

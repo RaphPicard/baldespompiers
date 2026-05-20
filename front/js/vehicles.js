@@ -1,45 +1,124 @@
+const FACILITY_LAT = 45.73158119172101;
+const FACILITY_LON = 4.890602482113532;
+const FACILITY_TOLERANCE = 0.0005; // ~50m
+
+function isAtFacility(v) {
+  return Math.abs(v.lat - FACILITY_LAT) < FACILITY_TOLERANCE
+      && Math.abs(v.lon - FACILITY_LON) < FACILITY_TOLERANCE;
+}
+
+// Cache des véhicules pour l'édition (évite un fetch supplémentaire)
+let vehiclesCache = [];
+
 async function loadVehicles() {
-  const res = await getVehicles();
-  const vehicles = res.data;
-  console.log(res.data);
+  const [vRes, rRes] = await Promise.all([getVehicles(), getRecallMode()]);
+  const vehicles = vRes.data;
+  vehiclesCache = vehicles;
+  const globalRecall = rRes.data.recallMode;
+  const recalledIds = new Set(rRes.data.recalledIds || []);
   const list = document.getElementById('vehicle-list');
+
+  // Synchronise l'apparence du bouton global avec l'état réel
+  const globalBtn = document.getElementById('recall-btn');
+  if (globalBtn) globalBtn.textContent = globalRecall ? '▶️ Reprendre le dispatch' : '🏠 Rappeler à la caserne';
 
   if (vehicles.length === 0) {
     list.innerHTML = '<p class="text-gray-400">Aucun véhicule</p>';
     return;
   }
 
-  list.innerHTML = vehicles.map(v => `
-    <div class="border rounded-lg p-3 flex justify-between items-center">
-      <div>
-        <p class="font-semibold">🚒 #${v.id} — ${v.type}</p>
-        <p class="text-sm text-gray-500">Liquide : ${v.liquidType} (${v.liquidQuantity}L)</p>
-        <p class="text-sm text-gray-500">Carburant : ${v.fuel}L — Équipage : ${v.crewMember}</p>
+  list.innerHTML = vehicles.map(v => {
+    const isRecalled = globalRecall || recalledIds.has(v.id);
+    const recallClass = isRecalled ? 'bg-green-500 hover:bg-green-600' : 'bg-blue-500 hover:bg-blue-600';
+    const recallLabel = isRecalled ? '▶️ Reprendre mission' : '🏠 Caserne';
+    const atFacility = isAtFacility(v);
+    const statusBadge = atFacility
+      ? '<span class="inline-block bg-green-100 text-green-700 text-xs font-semibold rounded px-2 py-0.5 ml-2">🏠 À la caserne</span>'
+      : '<span class="inline-block bg-orange-100 text-orange-700 text-xs font-semibold rounded px-2 py-0.5 ml-2">🚗 En mission</span>';
+    const editBtn = atFacility
+      ? `<button onclick="openEditModal(${v.id})" class="bg-gray-500 hover:bg-gray-600 text-white font-semibold rounded px-3 py-1 text-sm">✏️ Modifier</button>`
+      : '';
+    return `
+      <div class="border rounded-lg p-3 flex justify-between items-center">
+        <div>
+          <p class="font-semibold">🚒 #${v.id} — ${v.type}${statusBadge}</p>
+          <p class="text-sm text-gray-500">Liquide : ${v.liquidType} (${v.liquidQuantity}L)</p>
+          <p class="text-sm text-gray-500">Carburant : ${v.fuel}L — Équipage : ${v.crewMember}</p>
+        </div>
+        <div class="flex gap-2 flex-wrap justify-end">
+          ${editBtn}
+          <button onclick="toggleRecallOne(${v.id}, ${isRecalled})" class="${recallClass} text-white font-semibold rounded px-3 py-1 text-sm">
+            ${recallLabel}
+          </button>
+          <button onclick="removeVehicle(${v.id})" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded px-3 py-1 text-sm">
+            🗑 Supprimer
+          </button>
+        </div>
       </div>
-      <div class="flex gap-2">
-        <button onclick="recallOne(${v.id})" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded px-3 py-1 text-sm">
-          🏠 Caserne
-        </button>
-        <button onclick="removeVehicle(${v.id})" class="bg-red-500 hover:bg-red-600 text-white font-semibold rounded px-3 py-1 text-sm">
-          🗑 Supprimer
-        </button>
-      </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
-async function recallOne(id) {
+// ── Édition véhicule ─────────────────────────────────────────
+let editingVehicleId = null;
+
+function openEditModal(id) {
+  const v = vehiclesCache.find(x => x.id === id);
+  if (!v) return;
+  editingVehicleId = id;
+  document.getElementById('edit-vehicle-id').textContent = `#${id}`;
+  document.getElementById('edit-liquidType').value = v.liquidType;
+  document.getElementById('edit-crewMember').value = v.crewMember;
+  document.getElementById('edit-status').textContent = '';
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+function closeEditModal() {
+  editingVehicleId = null;
+  document.getElementById('edit-modal').classList.add('hidden');
+}
+
+async function submitEditVehicle() {
+  if (editingVehicleId == null) return;
+  const v = vehiclesCache.find(x => x.id === editingVehicleId);
+  if (!v) return;
+
+  // On renvoie le DTO complet (type, facilityRefID, etc.) pour ne pas casser le simulateur
+  const data = {
+    type: v.type,
+    liquidType: document.getElementById('edit-liquidType').value,
+    crewMember: Number(document.getElementById('edit-crewMember').value),
+    facilityRefID: v.facilityRefID,
+  };
+
+  try {
+    await updateVehicle(editingVehicleId, data);
+    document.getElementById('edit-status').textContent = '✅ Modifié';
+    closeEditModal();
+    loadVehicles();
+  } catch (err) {
+    document.getElementById('edit-status').textContent = '❌ Erreur';
+    console.error(err);
+  }
+}
+
+async function toggleRecallOne(id, isCurrentlyRecalled) {
   const FACILITY_LAT = 45.73158119172101;
   const FACILITY_LON = 4.890602482113532;
   try {
-    const res = await recallOneVehicle(id);
-    if (!res.data.inMission) {
-      // Véhicule libre → on déclenche aussi un déplacement direct vers la caserne
-      await moveVehicle(id, FACILITY_LAT, FACILITY_LON);
+    if (isCurrentlyRecalled) {
+      // Annule le rappel → véhicule peut reprendre les missions
+      await cancelRecallOneVehicle(id);
+    } else {
+      // Active le rappel individuel → ramène à la caserne
+      const res = await recallOneVehicle(id);
+      if (!res.data.inMission) {
+        await moveVehicle(id, FACILITY_LAT, FACILITY_LON);
+      }
     }
     loadVehicles();
   } catch (err) {
-    alert(`❌ Erreur rappel #${id}`);
+    alert(`❌ Erreur sur #${id}`);
     console.error(err);
   }
 }
@@ -66,8 +145,6 @@ async function submitCreateVehicle() {
   const data = {
     type: document.getElementById('type').value,
     liquidType: document.getElementById('liquidType').value,
-    liquidQuantity: Number(document.getElementById('liquidQuantity').value),
-    fuel: Number(document.getElementById('fuel').value),
     crewMember: Number(document.getElementById('crewMember').value),
     facilityRefID: FACILITY_ID
   };

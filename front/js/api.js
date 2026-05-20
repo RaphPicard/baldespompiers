@@ -11,3 +11,4 @@ const recallAllVehiclesApi = () => axios.post(`${API}/api/vehicles/recall-all`);
 const resumeDispatch = () => axios.post(`${API}/api/vehicles/resume`);
 const getRecallMode = () => axios.get(`${API}/api/vehicles/recall-mode`);
 const recallOneVehicle = (id) => axios.post(`${API}/api/vehicles/${id}/recall`);
+const cancelRecallOneVehicle = (id) => axios.delete(`${API}/api/vehicles/${id}/recall`);

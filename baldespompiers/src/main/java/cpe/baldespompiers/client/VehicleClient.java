@@ -74,6 +74,16 @@ public class VehicleClient {
                 .block();
     }
 
+    /** Variante "raw" : Map au lieu de DTO pour contourner le bug Jackson 2/3 sur @RequestBody. */
+    public VehicleDto updateVehicleRaw(String teamUuid, String vehicleId, Map<String, Object> body) {
+        return webClient.put()
+                .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(VehicleDto.class)
+                .block();
+    }
+
     /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */
     public VehicleDto moveVehicle(String teamUuid, String vehicleId, Coord destination) {
         return webClient.put()

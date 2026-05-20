@@ -125,10 +125,10 @@ public class VehicleMovementThread {
 
     /** Contexte d'un déplacement : utilisé pour interpréter l'état recallMode. */
     public enum MovePhase {
-        TO_FIRE,      // recallMode=true → abandonne, retourne caserne
-        TO_EVENT,     // idem TO_FIRE mais cible un event (blessé/accident)
-        TO_FACILITY,  // recallMode=false → abandonne le retour, libère pour redispatch
-        MANUAL        // ignore recallMode (déplacement libre)
+        TO_FIRE,            // recall actif → abandonne, retourne caserne
+        TO_EVENT,           // idem TO_FIRE mais cible un event (blessé/accident)
+        TO_FACILITY,        // retour recall : interruptible si recall désactivé en cours de route
+        MANUAL              // ignore recallMode (déplacement libre)
     }
 
     // ── Après exctinction d'un feu ? ───────────────────────────────────────────
@@ -187,8 +187,9 @@ public class VehicleMovementThread {
 
                 if (next.isEmpty()) {
                     // Aucun feu disponible → le véhicule est libéré (onDone le remettra à disposition)
-                    log.info("Véhicule {} opérationnel MAIS aucun feu disponible, retour libre", vehicle.getId());
-                    break; // pour l'instant on ne le ramène pas à la caserne, il reste où il est
+                    log.info("Véhicule {} opérationnel MAIS aucun feu disponible, retour libre (caserne)", vehicle.getId());
+                    needsRecharge = true;  // a commenter si on ne veut pas qu'il rentre à la caserne
+                    break;
                 }
 
                 FireDto nextFire = next.get();
@@ -201,7 +202,7 @@ public class VehicleMovementThread {
 
         } catch (InsufficientResourcesException e) { // si jamais plus d'essence/liquide OU RAPPEL DES/DU véhicule demandé en cours de mission → on considère que le véhicule doit rentrer à la caserne pour se "recharger" (reset)
             needsRecharge = true;
-            log.warn("[Mission] Véhicule {} abandonne la mission (feu #{}) — {}", vehicle.getId(), currentFire.getId(), e.getMessage());
+            log.warn("[Mission] Véhicule {} abandonne la mission (feu #{}) car — {}", vehicle.getId(), currentFire.getId(), e.getMessage());
 
         } catch (InterruptedException | IOException e) {
             needsRecharge = true;
@@ -575,8 +576,9 @@ public class VehicleMovementThread {
                     new Coord(currentLon, currentLat));
             Thread.sleep(vehicleDelay); // attend avant le prochain pas (simule la vitesse du véhicule)
 
-            // Coupe la mission si le carburant est trop bas pour continuer à avancer
-            if (updated != null && updated.getFuelQuantity() < giveUpFuel)
+            // Coupe la mission si le carburant est trop bas — uniquement en route vers un feu/event, jamais en retour caserne
+            if ((phase == MovePhase.TO_FIRE || phase == MovePhase.TO_EVENT)
+                    && updated != null && updated.getFuelQuantity() < giveUpFuel)
                 throw new InsufficientResourcesException("carburant insuffisant (fuel=" + updated.getFuelQuantity() + ")");
         }
     }
@@ -671,8 +673,6 @@ public class VehicleMovementThread {
 
     private void returnToFacility(VehicleDto vehicle) throws InterruptedException, IOException {
         if (vehicle.getFacilityRefID() == null) return;
-        // Récupère la position réelle du véhicule depuis le simulateur
-        // (peut différer du DTO local si la mission a été interrompue en cours de route)
         VehicleDto current = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
         if (current != null) {
             vehicle.setLon(current.getLon());
@@ -680,10 +680,12 @@ public class VehicleMovementThread {
         }
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
-        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), MovePhase.TO_FACILITY, null);
-        // test pour une autre caserne :
-        //movement_type(vehicle, teamUuid, 4.877449999999995, 45.772207882103, MovePhase.TO_FACILITY, null);
-
+        // Recall actif → TO_FACILITY (interruptible si recall annulé en cours de route)
+        // Pas de recall → retour pour ressources épuisées → MANUAL (va toujours jusqu'au bout)
+        boolean isRecall = emergencyManagerService.isRecallMode()
+                        || emergencyManagerService.isRecallRequested(vehicle.getId());
+        MovePhase phase = isRecall ? MovePhase.TO_FACILITY : MovePhase.MANUAL; // pour ne pas declencher ResumeMissionException en cas de retour pour ressources épuisées
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), phase, null);
     }
 
     // ── Attente du rechargement à la caserne ──────────────────────────────────

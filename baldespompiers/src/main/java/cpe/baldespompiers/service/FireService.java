@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 @Service
@@ -39,9 +40,8 @@ public class FireService {
     @Value("${dispatch.caserne.recall-cooldown-ms:30000}")
     private long recallCooldownMs;
 
-    /** Coordonnées de la caserne, chargées en lazy au premier dispatch. */
-    private volatile double caserneLon = Double.NaN;
-    private volatile double caserneLat = Double.NaN;
+    /** Liste de toutes nos casernes, chargée en lazy au premier dispatch. */
+    private final AtomicReference<List<FacilityDto>> knownFacilities = new AtomicReference<>(null);
 
 
 
@@ -175,54 +175,56 @@ public class FireService {
 
     // ── Protection caserne ─────────────────────────────────────────────────────
 
-    /** Charge les coordonnées de notre caserne une seule fois via notre teamUuid. */
-    private void ensureCaserneCoords() {
-        if (!Double.isNaN(caserneLon)) return; // déjà chargé
+    /** Charge toutes nos casernes une seule fois via notre teamUuid. */
+    private void ensureFacilityList() {
+        if (knownFacilities.get() != null) return; //coords de nos casernes déjà chargées
         List<FacilityDto> facilities = facilityClient.getAllFacilities(teamUuid);
         if (facilities == null || facilities.isEmpty()) return;
-        FacilityDto f = facilities.get(0); // on suppose qu'il n'y a qu'une caserne par équipe
-        caserneLon = f.getLon();
-        caserneLat = f.getLat();
-        log.info("Coordonnées de notre caserne chargées : lon={} lat={}", caserneLon, caserneLat);
+        knownFacilities.set(facilities);
+        log.info("{} caserne(s) chargée(s)", facilities.size());
+        facilities.forEach(f -> log.info("  → caserne #{} '{}' lon={} lat={}", f.getId(), f.getName(), f.getLon(), f.getLat()));
     }
 
-    private boolean isCaserneOnFire(FireDto fire) {
-        if (Double.isNaN(caserneLon)) return false; // coordonnées de la caserne non chargées → on ne peut pas détecter un feu sur la caserne, on suppose que ce n'est pas le cas
-        return calcule_distance(fire.getLat(), fire.getLon(), caserneLat, caserneLon) < caserneFireRadius;
+    /** Retourne la caserne menacée par ce feu, ou null si aucune n'est concernée. */
+    private FacilityDto caserneOnFire(FireDto fire) {
+        List<FacilityDto> facilities = knownFacilities.get();
+        if (facilities == null) return null;
+        return facilities.stream()
+                .filter(f -> calcule_distance(fire.getLat(), fire.getLon(), f.getLat(), f.getLon()) < caserneFireRadius)
+                .findFirst()
+                .orElse(null);
     }
 
     /**
-     * Gère un feu détecté sur la caserne avec priorité absolue.
+     * Gère un feu détecté sur une caserne avec priorité absolue.
      * Essaie d'abord un véhicule libre ; si tous sont en mission, rappelle le meilleur
-     * (liquide compatible + le plus proche de la caserne).
+     * (liquide compatible + le plus proche de la caserne menacée).
      */
-    private void handleCasernefire(FireDto fire, List<VehicleDto> vehicles) {
+    private void handleCasernefire(FireDto fire, FacilityDto caserne, List<VehicleDto> vehicles) {
         // Tier 0a : véhicule libre compatible → dispatch immédiat
         Optional<VehicleDto> free = candidates(vehicles, fire)
                 .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
         if (free.isPresent()) {
-            log.error("=== FEU CASERNE #{} — dispatch immédiat véhicule {} ===", fire.getId(), free.get().getId());
+            log.error("=== FEU CASERNE '{}' #{} — dispatch immédiat véhicule {} ===", caserne.getName(), fire.getId(), free.get().getId());
             emergencyManagerService.dispatch(free.get(), fire);
             return;
         }
 
         // Cooldown : ne pas rappeler plusieurs fois pour le même feu
         Long last = recallIssuedAt.get(fire.getId());
-        if (last != null && System.currentTimeMillis() - last < recallCooldownMs) { // un rappel a été émis récemment pour ce feu → on attend avant d'en émettre un autre
+        if (last != null && System.currentTimeMillis() - last < recallCooldownMs) {
             log.debug("Feu caserne #{} — rappel déjà en cours, attente de 30s", fire.getId());
             return;
         }
 
-        // Tier 0b : tous en mission → rappeler le compatible + le plus proche de la caserne
+        // Tier 0b : tous en mission → rappeler le compatible + le plus proche de CETTE caserne
         vehicles.stream()
                 .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId()))
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
-                // au cas où on aurait plusieurs véhicules du même anti-feu --> tri par distance !
-                .min(Comparator.comparingDouble(v -> calcule_distance(v.getLat(), v.getLon(), caserneLat, caserneLon)))
+                .min(Comparator.comparingDouble(v -> calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon())))
                 .ifPresent(v -> {
-                    log.error("=== FEU CASERNE #{} — rappel forcé véhicule {} ===", fire.getId(), v.getId());
-
-                    emergencyManagerService.requestRecall(v.getId()); // demande un rappel individuel pour ce véhicule (il rentrera à la caserne dès que possible, même s'il n'est pas encore revenu de sa mission actuelle)
+                    log.error("=== FEU CASERNE '{}' #{} — rappel forcé véhicule {} ===", caserne.getName(), fire.getId(), v.getId());
+                    emergencyManagerService.requestRecall(v.getId());
                     recallIssuedAt.put(fire.getId(), System.currentTimeMillis());
                 });
     }
@@ -236,13 +238,15 @@ public class FireService {
     // ── Dispatch feux ──────────────────────────────────────────────────────────
 
     public void dispatchFires(List<FireDto> fires, List<VehicleDto> vehicles) {
-        ensureCaserneCoords(); // charge les coordonnées de la caserne au besoin pour pouvoir détecter les feux sur la caserne (ne le fait qu'une fois)
+        ensureFacilityList();
 
-        // Priorité absolue : feux sur la caserne traités avant tout le reste
+        // Priorité absolue : feux sur une caserne traités avant tout le reste
         fires.stream()
                 .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId()))
-                .filter(this::isCaserneOnFire)
-                .forEach(f -> handleCasernefire(f, vehicles));
+                .forEach(f -> {
+                    FacilityDto caserne = caserneOnFire(f);
+                    if (caserne != null) handleCasernefire(f, caserne, vehicles);
+                });
 
         // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
         // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)

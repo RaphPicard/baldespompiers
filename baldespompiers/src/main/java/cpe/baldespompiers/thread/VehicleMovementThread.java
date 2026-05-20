@@ -15,6 +15,7 @@ import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.service.FireService;
+import cpe.baldespompiers.service.RPEventService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,7 @@ public class VehicleMovementThread {
     private final RpEventClient rpEventClient;
     private final EmergencyManagerService emergencyManagerService;
     private final FireService fireService;
+    private final RPEventService rpEventService;
 
     @Value("${simulator.team-uuid}")
     private String teamUuid;
@@ -96,13 +98,15 @@ public class VehicleMovementThread {
                                  FacilityClient facilityClient,
                                  RpEventClient rpEventClient,
                                  @Lazy EmergencyManagerService emergencyManagerService, // Lazy pour éviter la dépendance circulaire (EmergencyManagerService dépend de VehicleMovementThread)
-                                 @Lazy FireService fireService) { // Lazy va faire en sorte que le bean FireService ne soit injecté que lorsqu'il est réellement utilisé, évitant ainsi la boucle de dépendance au démarrage de l'application
+                                 @Lazy FireService fireService,
+                                 @Lazy RPEventService rpEventService) {
         this.vehicleClient = vehicleClient;
         this.fireClient = fireClient;
         this.facilityClient = facilityClient;
         this.rpEventClient           = rpEventClient;
         this.emergencyManagerService = emergencyManagerService;
         this.fireService = fireService;
+        this.rpEventService = rpEventService;
     }
 
     // ── Signal d'abandon de mission ───────────────────────────────────────────
@@ -122,6 +126,7 @@ public class VehicleMovementThread {
     /** Contexte d'un déplacement : utilisé pour interpréter l'état recallMode. */
     public enum MovePhase {
         TO_FIRE,      // recallMode=true → abandonne, retourne caserne
+        TO_EVENT,     // idem TO_FIRE mais cible un event (blessé/accident)
         TO_FACILITY,  // recallMode=false → abandonne le retour, libère pour redispatch
         MANUAL        // ignore recallMode (déplacement libre)
     }
@@ -228,34 +233,46 @@ public class VehicleMovementThread {
 
     // ── moveVehicleToEvent (accidents/blessés) ────────────────────────────────
     @Async("vehicleMovementExecutor")
-    public void moveVehicleToEvent(VehicleDto vehicle, EmergencyEventDto event,
+    public void moveVehicleToEvent(VehicleDto vehicle, EmergencyEventDto initialEvent,
                                    String teamUuid, Runnable onDone) {
+        EmergencyEventDto currentEvent = initialEvent;
         boolean needsRecharge = false;
         try {
-            // Phase 1 : aller sur l'event
-            movement_type(vehicle, teamUuid,
-                    event.getLon(), event.getLat(), MovePhase.TO_FIRE);
-            vehicle.setLon(event.getLon());
-            vehicle.setLat(event.getLat());
+            while (true) {
+                // Phase 1 : aller sur l'event, en détectant si l'event est résolu en route
+                try {
+                    movement_type(vehicle, teamUuid,
+                            currentEvent.getLon(), currentEvent.getLat(), MovePhase.TO_EVENT, currentEvent.getId());
+                } catch (FireGoneException e) {
+                    log.info("Véhicule {} : event #{} résolu en route — recherche d'un autre event",
+                            vehicle.getId(), currentEvent.getId());
+                    EmergencyEventDto redirect = redirectAfterEventGone(vehicle, currentEvent);
+                    if (redirect == null) break; // aucun event disponible → libère le véhicule
+                    currentEvent = redirect;
+                    continue;
+                }
+                vehicle.setLon(currentEvent.getLon());
+                vehicle.setLat(currentEvent.getLat());
 
-            // Phase 2 : intervention
-            emergencyManagerService.getVehicleStates()
-                    .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
-            log.info("Véhicule {} arrivé sur event #{} — attente résolution",
-                    vehicle.getId(), event.getId());
-            waitForEventOut(event.getId(), vehicle.getId());
+                // Phase 2 : intervention
+                emergencyManagerService.getVehicleStates()
+                        .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
+                log.info("Véhicule {} arrivé sur event #{} — attente résolution",
+                        vehicle.getId(), currentEvent.getId());
+                waitForEventOut(currentEvent.getId(), vehicle.getId());
 
-            // Vérifier ressources après intervention
-            VehicleDto refreshed = vehicleClient.getVehicleById(
-                    String.valueOf(vehicle.getId()));
-            if (refreshed == null || vehicleNeedsRecharge(refreshed)) {
-                needsRecharge = true;
+                // Vérifier ressources après intervention
+                VehicleDto refreshed = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
+                if (refreshed == null || vehicleNeedsRecharge(refreshed)) {
+                    needsRecharge = true;
+                }
+                break; // mission terminée
             }
 
         } catch (InsufficientResourcesException e) {
             needsRecharge = true;
             log.warn("[Event] Véhicule {} abandonne event #{} — {}",
-                    vehicle.getId(), event.getId(), e.getMessage());
+                    vehicle.getId(), currentEvent.getId(), e.getMessage());
         } catch (InterruptedException | IOException e) {
             needsRecharge = true;
             Thread.currentThread().interrupt();
@@ -265,6 +282,7 @@ public class VehicleMovementThread {
             log.error("[Event] Erreur véhicule {} : {}", vehicle.getId(), e.getMessage());
         } finally {
             try {
+                rpEventService.releaseEvent(currentEvent.getId());
                 if (needsRecharge) {
                     try {
                         returnToFacility(vehicle);
@@ -278,6 +296,37 @@ public class VehicleMovementThread {
             }
             if (onDone != null) onDone.run();
         }
+    }
+
+    // ── Redirection après event résolu en route ────────────────────────────────
+
+    /**
+     * Miroir de redirectAfterFireGone pour les events (blessés/accidents).
+     * Libère l'event résolu, cherche un autre via findNextEventForVehicle et claimEvent.
+     */
+    private EmergencyEventDto redirectAfterEventGone(VehicleDto vehicle, EmergencyEventDto resolvedEvent) {
+        rpEventService.releaseEvent(resolvedEvent.getId());
+
+        VehicleDto refreshed = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
+        if (refreshed != null) {
+            vehicle.setLon(refreshed.getLon());
+            vehicle.setLat(refreshed.getLat());
+        }
+
+        List<EmergencyEventDto> activeEvents = rpEventClient.getAllEvents();
+        Optional<EmergencyEventDto> next = rpEventService.findNextEventForVehicle(
+                refreshed != null ? refreshed : vehicle,
+                activeEvents != null ? activeEvents : List.of());
+
+        if (next.isEmpty()) {
+            log.info("Véhicule {} : event #{} résolu en route, aucun autre disponible — libération",
+                    vehicle.getId(), resolvedEvent.getId());
+            return null;
+        }
+
+        EmergencyEventDto nextEvent = next.get();
+        rpEventService.claimEvent(vehicle.getId(), resolvedEvent.getId(), nextEvent.getId()); // claimEvent loggue déjà la transition
+        return nextEvent;
     }
 
     /**
@@ -299,15 +348,15 @@ public class VehicleMovementThread {
 
     // ── Sélection du mode de déplacement ──────────────────────────────────────
 
-    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat, MovePhase phase, Integer targetFireId)
+    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat, MovePhase phase, Integer targetId)
             throws InterruptedException, IOException {
         long vehicleDelay = computeStepDelay(vehicle.getType());
 
         if ("straight".equals(movementMode)) {
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay, phase, targetFireId);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay, phase, targetId);
 
         } else if ("road".equals(movementMode)) {
-            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay, phase, targetFireId);
+            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay, phase, targetId);
 
         } else {
             teleport(vehicle.getId(), lon, lat);
@@ -344,7 +393,7 @@ public class VehicleMovementThread {
      */
     private void moveFollower(VehicleDto vehicle,
                               double targetLon, double targetLat,
-                              String teamUuid, long vehicleDelay, MovePhase phase, Integer targetFireId)
+                              String teamUuid, long vehicleDelay, MovePhase phase, Integer targetId)
             throws IOException, InterruptedException {
 
         // Construit l'URL OSRM : "lon_départ,lat_départ;lon_cible,lat_cible" avec géométrie complète
@@ -368,7 +417,7 @@ public class VehicleMovementThread {
         if (response.statusCode() != 200) {
             // OSRM injoignable ou surchargé → on déplace quand même le véhicule en ligne droite
             log.warn("[OSRM] HTTP {} — fallback ligne droite", response.statusCode());
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetId);
             return;
         }
 
@@ -377,7 +426,7 @@ public class VehicleMovementThread {
         if (!"Ok".equals(root.path("code").asText())) {
             // OSRM n'a pas trouvé de route (feu hors réseau routier, zone isolée…) → fallback ligne droite
             log.warn("[OSRM] {} — fallback ligne droite", root.path("code").asText());
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetId);
             return;
         }
 
@@ -390,7 +439,7 @@ public class VehicleMovementThread {
         if (coordinates == null || !coordinates.isArray()) {
             // Réponse malformée → fallback ligne droite pour ne pas bloquer le véhicule
             log.warn("[OSRM] Pas de coordonnées — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetId);
             return;
         }
 
@@ -406,7 +455,7 @@ public class VehicleMovementThread {
         for (int i = 1; i < waypoints.size(); i++) {
             double[] from = waypoints.get(i - 1);
             double[] to   = waypoints.get(i);
-            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay, phase, targetFireId);
+            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay, phase, targetId);
         }
 
         // OSRM s'arrête à la route la plus proche. Si le feu est en dehors du réseau (forêt, champ…),
@@ -417,7 +466,7 @@ public class VehicleMovementThread {
             double dLat = targetLat - last[1];
             // peut etre : enlever le if et mettre dans tous les cas moveToPoint
             if (Math.sqrt(dLon * dLon + dLat * dLat) > stepSize) {
-                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
+                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetId);
             }
         }
 
@@ -447,16 +496,17 @@ public class VehicleMovementThread {
      */
     private void moveToPoint(double fromLon, double fromLat,
                              double toLon, double toLat,
-                             Integer vehicleId, long vehicleDelay, MovePhase phase, Integer targetFireId) throws InterruptedException {
+                             Integer vehicleId, long vehicleDelay, MovePhase phase, Integer targetId) throws InterruptedException {
         double currentLon = fromLon;
         double currentLat = fromLat;
-        long lastFireCheck = System.currentTimeMillis(); // pour vérifier périodiquement si le feu cible a été éteint en route, sans faire de check à chaque pas (pour ne pas surcharger le simulateur et les logs)
+        long lastCheck = System.currentTimeMillis();
 
         while (true) {
 
             // Check du mode rappel (global ou individuel) à chaque pas → abandonne immédiatement
-            if (phase == MovePhase.TO_FIRE && emergencyManagerService.isRecallRequested(vehicleId)) // si rappel demandé lance une InsufficientResourcesException qui va être catch dans moveVehicle et qui va faire que le véhicule va abandonner sa mission et retourner à la caserne
-                throw new InsufficientResourcesException("rappel actif — abandon trajet vers feu");
+            if ((phase == MovePhase.TO_FIRE || phase == MovePhase.TO_EVENT)
+                    && emergencyManagerService.isRecallRequested(vehicleId))
+                throw new InsufficientResourcesException("rappel actif — abandon trajet");
             // Retour caserne : interrompu UNIQUEMENT si recallMode global devient OFF (les rappels individuels doivent finir leur trajet retour)
             if (phase == MovePhase.TO_FACILITY && !emergencyManagerService.isRecallMode()
                     && !emergencyManagerService.isRecallRequested(vehicleId))
@@ -466,14 +516,20 @@ public class VehicleMovementThread {
 
 
 
-            // Vérifie périodiquement si le feu cible a été éteint par une autre équipe en cours de route
-            if (phase == MovePhase.TO_FIRE && targetFireId != null) {
-                long now = System.currentTimeMillis(); // pour éviter de faire un check à chaque pas, on vérifie seulement toutes les fireCheckDelayMs millisecondes
-                if (now - lastFireCheck >= fireCheckDelayMs) { // si le délai depuis le dernier check dépasse fireCheckDelayMs, on vérifie l'état du feu cible
-                    lastFireCheck = now;
-                    FireDto fire = fireClient.getFireById(targetFireId);
-                    if (fire == null || fire.getIntensity() <= 0)
-                        throw new FireGoneException("feu #" + targetFireId + " éteint en route par une autre équipe");
+            // Vérifie périodiquement si la cible (feu ou event) a été résolue en cours de route
+            if (targetId != null) {
+                long now = System.currentTimeMillis();
+                if (now - lastCheck >= fireCheckDelayMs) {
+                    lastCheck = now;
+                    if (phase == MovePhase.TO_FIRE) {
+                        FireDto fire = fireClient.getFireById(targetId);
+                        if (fire == null || fire.getIntensity() <= 0)
+                            throw new FireGoneException("feu #" + targetId + " éteint en route par une autre équipe");
+                    } else if (phase == MovePhase.TO_EVENT) {
+                        EmergencyEventDto ev = rpEventClient.getEventById(targetId);
+                        if (ev == null || ev.getIntensity() <= 0)
+                            throw new FireGoneException("event #" + targetId + " résolu en route par une autre équipe");
+                    }
                 }
             }
 

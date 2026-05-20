@@ -3,6 +3,7 @@ package cpe.baldespompiers.service;
 import cpe.baldespompiers.model.dto.EmergencyEventDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.EmergencyType;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -90,5 +91,30 @@ public class RPEventService {
         double dx = lon1 - lon2;
         double dy = lat1 - lat2;
         return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // ── Méthodes miroir de FireService (pour la redirection en route) ──────────
+
+    /** Meilleur event non-assigné compatible avec ce véhicule, pour un départ direct. */
+    public Optional<EmergencyEventDto> findNextEventForVehicle(VehicleDto vehicle,
+                                                               List<EmergencyEventDto> activeEvents) {
+        return activeEvents.stream()
+                .filter(e -> e.getIntensity() > abandonThreshold)
+                .filter(e -> !emergencyManagerService.getAssignedEvents().contains(e.getId()))
+                .filter(e -> isCompatibleWithEvent(vehicle, e))
+                .max(Comparator.comparingDouble(e -> eventScore(vehicle, e)));
+    }
+
+    /** Transition directe d'un event à un autre (sans caserne). */
+    public void claimEvent(Integer vehicleId, Integer oldEventId, Integer newEventId) {
+        emergencyManagerService.getAssignedEvents().remove(oldEventId);
+        emergencyManagerService.getAssignedEvents().add(newEventId);
+        emergencyManagerService.getVehicleStates().put(vehicleId, EmergencyManagerService.VehicleState.MOVING);
+        log.info("Véhicule {} : transition event #{} → event #{}", vehicleId, oldEventId, newEventId);
+    }
+
+    /** Libère l'assignation d'un event (appel du finally dans moveVehicleToEvent). */
+    public void releaseEvent(Integer eventId) {
+        emergencyManagerService.getAssignedEvents().remove(eventId);
     }
 }

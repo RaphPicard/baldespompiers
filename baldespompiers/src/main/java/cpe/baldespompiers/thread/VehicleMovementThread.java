@@ -2,13 +2,16 @@ package cpe.baldespompiers.thread;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import cpe.baldespompiers.client.RpEventClient;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.client.FireClient;
 import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.EmergencyEventDto;
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
+import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.service.FireService;
@@ -47,6 +50,7 @@ public class VehicleMovementThread {
     private final VehicleClient vehicleClient;
     private final FireClient fireClient;
     private final FacilityClient facilityClient;
+    private final RpEventClient rpEventClient;
     private final EmergencyManagerService emergencyManagerService;
     private final FireService fireService;
 
@@ -90,11 +94,13 @@ public class VehicleMovementThread {
     public VehicleMovementThread(VehicleClient vehicleClient,
                                  FireClient fireClient,
                                  FacilityClient facilityClient,
+                                 RpEventClient rpEventClient,
                                  @Lazy EmergencyManagerService emergencyManagerService, // Lazy pour éviter la dépendance circulaire (EmergencyManagerService dépend de VehicleMovementThread)
                                  @Lazy FireService fireService) { // Lazy va faire en sorte que le bean FireService ne soit injecté que lorsqu'il est réellement utilisé, évitant ainsi la boucle de dépendance au démarrage de l'application
         this.vehicleClient = vehicleClient;
         this.fireClient = fireClient;
         this.facilityClient = facilityClient;
+        this.rpEventClient           = rpEventClient;
         this.emergencyManagerService = emergencyManagerService;
         this.fireService = fireService;
     }
@@ -107,6 +113,10 @@ public class VehicleMovementThread {
     // Signal de reprise de mission : levée pendant un retour caserne si recallMode passe à OFF
     private static final class ResumeMissionException extends RuntimeException {
         ResumeMissionException(String msg) { super(msg, null, true, false); }
+    }
+    // Signal : feu éteint par une autre équipe pendant le trajet vers lui
+    private static final class FireGoneException extends RuntimeException {
+        FireGoneException(String msg) { super(msg, null, true, false); }
     }
 
     /** Contexte d'un déplacement : utilisé pour interpréter l'état recallMode. */
@@ -211,6 +221,60 @@ public class VehicleMovementThread {
                 }
             } catch (Exception e) {
                 log.error("[Move] Erreur retour/recharge véhicule {} : {}", vehicle.getId(), e.getMessage());
+            }
+            if (onDone != null) onDone.run();
+        }
+    }
+
+    // ── moveVehicleToEvent (accidents/blessés) ────────────────────────────────
+    @Async("vehicleMovementExecutor")
+    public void moveVehicleToEvent(VehicleDto vehicle, EmergencyEventDto event,
+                                   String teamUuid, Runnable onDone) {
+        boolean needsRecharge = false;
+        try {
+            // Phase 1 : aller sur l'event
+            movement_type(vehicle, teamUuid,
+                    event.getLon(), event.getLat(), MovePhase.TO_FIRE);
+            vehicle.setLon(event.getLon());
+            vehicle.setLat(event.getLat());
+
+            // Phase 2 : intervention
+            emergencyManagerService.getVehicleStates()
+                    .put(vehicle.getId(), EmergencyManagerService.VehicleState.ON_FIRE);
+            log.info("Véhicule {} arrivé sur event #{} — attente résolution",
+                    vehicle.getId(), event.getId());
+            waitForEventOut(event.getId(), vehicle.getId());
+
+            // Vérifier ressources après intervention
+            VehicleDto refreshed = vehicleClient.getVehicleById(
+                    String.valueOf(vehicle.getId()));
+            if (refreshed == null || vehicleNeedsRecharge(refreshed)) {
+                needsRecharge = true;
+            }
+
+        } catch (InsufficientResourcesException e) {
+            needsRecharge = true;
+            log.warn("[Event] Véhicule {} abandonne event #{} — {}",
+                    vehicle.getId(), event.getId(), e.getMessage());
+        } catch (InterruptedException | IOException e) {
+            needsRecharge = true;
+            Thread.currentThread().interrupt();
+            log.error("[Event] Véhicule {} : {}", vehicle.getId(), e.getMessage());
+        } catch (Exception e) {
+            needsRecharge = true;
+            log.error("[Event] Erreur véhicule {} : {}", vehicle.getId(), e.getMessage());
+        } finally {
+            try {
+                if (needsRecharge) {
+                    try {
+                        returnToFacility(vehicle);
+                        waitForRecharge(vehicle.getId());
+                    } catch (ResumeMissionException e) {
+                        log.info("Véhicule {} : retour event interrompu", vehicle.getId());
+                    }
+                }
+            } catch (Exception e) {
+                log.error("[Event] Erreur retour véhicule {} : {}", vehicle.getId(), e.getMessage());
             }
             if (onDone != null) onDone.run();
         }
@@ -475,7 +539,7 @@ public class VehicleMovementThread {
         }
 
         FireDto nextFire = next.get();
-        fireService.claimFire(vehicle.getId(), deadFire.getId(), nextFire.getId());
+        fireService.claimFire(vehicle.getId(), deadFire.getId(), nextFire.getId()); // claimFire loggue déjà la transition
         log.info("Véhicule {} : redirigé vers feu #{} (car feu #{} éteint en route par une autre équipe)", vehicle.getId(), nextFire.getId(), deadFire.getId());
         return nextFire;
     }
@@ -511,6 +575,21 @@ public class VehicleMovementThread {
 
             log.info("[Feu #{}] intensité = {}", fireId, current.getIntensity());
             Thread.sleep(fireCheckDelayMs); // attend quelques secondes avant de revérifier
+        }
+    }
+
+    // ── Attente résolution event ──────────────────────────────────────────────
+    private void waitForEventOut(Integer eventId, Integer vehicleId)
+            throws InterruptedException {
+        while (true) {
+            if (emergencyManagerService.isRecallRequested(vehicleId))
+                throw new InsufficientResourcesException("rappel actif");
+
+            EmergencyEventDto current = rpEventClient.getEventById(eventId);
+            if (current == null || current.getIntensity() <= 0) break;
+
+            log.info("[Event #{}] intensité = {}", eventId, current.getIntensity());
+            Thread.sleep(fireCheckDelayMs);
         }
     }
 

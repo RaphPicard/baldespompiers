@@ -32,6 +32,10 @@ public class EventPollerThread {
 
     private volatile List<FireDto> cachedFires = List.of();
     private volatile List<VehicleDto> cachedVehicles = List.of();
+    // Mémoire des derniers compteurs pour n'afficher le log que si ça change
+    private volatile int lastFireCount = -1;
+    private volatile int lastVehicleCount = -1;
+
 
     public EventPollerThread(FireClient fireClient,
                              VehicleClient vehicleClient,
@@ -60,7 +64,17 @@ public class EventPollerThread {
                 return;
             }
 
-            log.info("Feux actifs : {}, véhicules : {}", fires.size(), vehicles.size());
+            // juste pour ne pas afficher les logs de feux/vehicules ACTIFS tout le temps
+            int fireCount = fires.size();
+            int vehicleCount = vehicles.size();
+            if (fireCount != lastFireCount || vehicleCount != lastVehicleCount) {
+                log.info("Feux actifs : {}, véhicules : {}", fireCount, vehicleCount);
+                lastFireCount = fireCount;
+                lastVehicleCount = vehicleCount;
+            }
+
+
+
             emergencyManagerService.dispatchAll(fires, vehicles);
         } catch (Exception e) {
             log.error("Erreur polling : {}", e.getMessage());

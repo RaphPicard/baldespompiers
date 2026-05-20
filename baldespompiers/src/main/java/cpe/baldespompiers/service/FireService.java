@@ -1,5 +1,7 @@
 package cpe.baldespompiers.service;
 
+import cpe.baldespompiers.client.FacilityClient;
+import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.LiquidType;
@@ -11,7 +13,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 @Service
@@ -20,6 +24,29 @@ public class FireService {
     private static final Logger log = LoggerFactory.getLogger(FireService.class);
 
     private final EmergencyManagerService emergencyManagerService;
+    private final FacilityClient facilityClient;
+
+    @Value("${simulator.team-uuid}")
+    private String teamUuid;
+
+
+
+    /** Rayon de détection d'un feu "sur la caserne" (~200 m en degrés). */
+    @Value("${dispatch.caserne.fire-radius:0.002}")
+    private double caserneFireRadius;
+
+    /** Cooldown entre deux rappels pour le même feu de caserne (évite les rappels répétés). */
+    @Value("${dispatch.caserne.recall-cooldown-ms:30000}")
+    private long recallCooldownMs;
+
+    /** Coordonnées de la caserne, chargées en lazy au premier dispatch. */
+    private volatile double caserneLon = Double.NaN;
+    private volatile double caserneLat = Double.NaN;
+
+
+
+    /** Timestamp du dernier rappel émis par fire ID, pour éviter les rappels répétés. Pour le feu à la caserne */
+    private final Map<Integer, Long> recallIssuedAt = new ConcurrentHashMap<>();
 
     // Seuil absolu : en dessous, le véhicule est exclu du dispatch
     @Value("${dispatch.min.fuel:10.0}")
@@ -42,6 +69,9 @@ public class FireService {
     @Value("${dispatch.ready.crew:3}")
     private int readyCrew;
 
+
+
+
     // Poids/Importance des paramètres dans le calcul du score des véhicules pour dispatch
     @Value("${dispatch.efficiency-weight:50.0}")
     private double efficiencyWeight;
@@ -58,8 +88,14 @@ public class FireService {
     @Value("${dispatch.distance-weight:300.0}")
     private double distanceWeight;
 
-    public FireService(@Lazy EmergencyManagerService emergencyManagerService) {
+
+
+
+
+    public FireService(@Lazy EmergencyManagerService emergencyManagerService,
+                       FacilityClient facilityClient) {
         this.emergencyManagerService = emergencyManagerService;
+        this.facilityClient = facilityClient;
     }
 
     // ── Compatibilité liquide ──────────────────────────────────────────────────
@@ -111,6 +147,10 @@ public class FireService {
                 + fuelRatio * fuelWeight;                // 0–-45 (0.15° ≈ 16 km max à Lyon)
     }
 
+
+
+
+
     // ── Filtres de candidats ───────────────────────────────────────────────────
 
     /** Véhicules libres, au-dessus des seuils minimaux et compatibles avec le type de feu. */
@@ -133,17 +173,94 @@ public class FireService {
                 .filter(v -> v.getCrewMember() >= readyCrew);
     }
 
+
+
+
+
+
+
+
+    // ── Protection caserne ─────────────────────────────────────────────────────
+
+    /** Charge les coordonnées de notre caserne une seule fois via notre teamUuid. */
+    private void ensureCaserneCoords() {
+        if (!Double.isNaN(caserneLon)) return; // déjà chargé
+        List<FacilityDto> facilities = facilityClient.getFacilityById(teamUuid);
+        if (facilities == null || facilities.isEmpty()) return;
+        FacilityDto f = facilities.get(0); // on suppose qu'il n'y a qu'une caserne par équipe
+        caserneLon = f.getLon();
+        caserneLat = f.getLat();
+        log.info("Coordonnées de notre caserne chargées : lon={} lat={}", caserneLon, caserneLat);
+    }
+
+    private boolean isCaserneOnFire(FireDto fire) {
+        if (Double.isNaN(caserneLon)) return false; // coordonnées de la caserne non chargées → on ne peut pas détecter un feu sur la caserne, on suppose que ce n'est pas le cas
+        return calcule_distance(fire.getLat(), fire.getLon(), caserneLat, caserneLon) < caserneFireRadius;
+    }
+
+    /**
+     * Gère un feu détecté sur la caserne avec priorité absolue.
+     * Essaie d'abord un véhicule libre ; si tous sont en mission, rappelle le meilleur
+     * (liquide compatible + le plus proche de la caserne).
+     */
+    private void handleCasernefire(FireDto fire, List<VehicleDto> vehicles) {
+        // Tier 0a : véhicule libre compatible → dispatch immédiat
+        Optional<VehicleDto> free = candidates(vehicles, fire)
+                .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
+        if (free.isPresent()) {
+            log.error("=== FEU CASERNE #{} — dispatch immédiat véhicule {} ===", fire.getId(), free.get().getId());
+            emergencyManagerService.dispatch(free.get(), fire);
+            return;
+        }
+
+        // Cooldown : ne pas rappeler plusieurs fois pour le même feu
+        Long last = recallIssuedAt.get(fire.getId());
+        if (last != null && System.currentTimeMillis() - last < recallCooldownMs) { // un rappel a été émis récemment pour ce feu → on attend avant d'en émettre un autre
+            log.debug("Feu caserne #{} — rappel déjà en cours, attente de 30s", fire.getId());
+            return;
+        }
+
+        // Tier 0b : tous en mission → rappeler le compatible + le plus proche de la caserne
+        vehicles.stream()
+                .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
+                // au cas où on aurait plusieurs véhicules du même anti-feu --> tri par distance !
+                .min(Comparator.comparingDouble(v -> calcule_distance(v.getLat(), v.getLon(), caserneLat, caserneLon)))
+                .ifPresent(v -> {
+                    log.error("=== FEU CASERNE #{} — rappel forcé véhicule {} ===", fire.getId(), v.getId());
+
+                    emergencyManagerService.requestRecall(v.getId()); // demande un rappel individuel pour ce véhicule (il rentrera à la caserne dès que possible, même s'il n'est pas encore revenu de sa mission actuelle)
+                    recallIssuedAt.put(fire.getId(), System.currentTimeMillis());
+                });
+    }
+
+
+
+
+
+
+
     // ── Dispatch feux ──────────────────────────────────────────────────────────
 
     public void dispatchFires(List<FireDto> fires, List<VehicleDto> vehicles) {
+        ensureCaserneCoords(); // charge les coordonnées de la caserne au besoin pour pouvoir détecter les feux sur la caserne (ne le fait qu'une fois)
+
+        // Priorité absolue : feux sur la caserne traités avant tout le reste
+        fires.stream()
+                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId()))
+                .filter(this::isCaserneOnFire)
+                .forEach(f -> handleCasernefire(f, vehicles));
+
         // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
         // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)
         List<FireDto> sortedFires = fires.stream()
                 .sorted(Comparator
-                        // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
+                // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
                 .comparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
                 // 2. À égalité de compatibilité, les plus intenses d'abord
                 .thenComparingDouble(f -> -f.getIntensity())) // -f pour un tri décroissant
+                // 3. Feux sans blessés en premier (libère les véhicules plus vite pour les feux complexes)
+                // .thenComparingInt((FireDto f) -> (f.getInjuredPeopleDtoList() == null || f.getInjuredPeopleDtoList().isEmpty()) ? 0 : 1)
                 .toList();
 
         for (FireDto fire : sortedFires) {
@@ -186,6 +303,12 @@ public class FireService {
         }
     }
 
+
+
+
+
+
+
     /**
      * Cherche le meilleur feu non-assigné compatible avec ce véhicule pour un départ direct
      * (sans repassage par la caserne). Réutilise isLiquidCompatible et vehicleScore.
@@ -212,5 +335,6 @@ public class FireService {
     /** Libère uniquement l'assignation du feu (appel du finally dans moveVehicle), sans changer l'état du véhicule. */
     public void releaseFire(Integer fireId) {
         emergencyManagerService.getAssignedFires().remove(fireId);
+        recallIssuedAt.remove(fireId);
     }
 }

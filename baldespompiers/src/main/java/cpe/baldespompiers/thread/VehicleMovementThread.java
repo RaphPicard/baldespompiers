@@ -73,10 +73,10 @@ public class VehicleMovementThread {
     @Value("${dispatch.give_up.liquid:0.0}")
     private float giveUpLiquid;
 
-    @Value("${dispatch.min.fuel:10.0}")
+    @Value("${dispatch.min.fuel:20.0}")
     private float minFuel;
 
-    @Value("${dispatch.min.liquid:10.0}")
+    @Value("${dispatch.min.liquid:20.0}")
     private float minLiquid;
 
     // Seuils "prêt" : atteints à la caserne avant de libérer le véhicule pour un nouveau dispatch
@@ -155,7 +155,7 @@ public class VehicleMovementThread {
                 if (vehicleNeedsRecharge(refreshed)) { needsRecharge = true; break; } //break sort de la boucle While(true) et va au error/exeption et finally !!!
 
                 // Mode rappel (global ou individuel) : retour immédiat à la caserne, même si ressources OK
-                if (emergencyManagerService.isRecallRequested(vehicle.getId())) { needsRecharge = true; break; }
+                if (emergencyManagerService.isRecallRequested(vehicle.getId())) { needsRecharge = true; break; } //isRecallrequested renvoie le bouléen de recall mis à true par l'appui du boutton "Rappeler" en html
 
                 // Ressources suffisantes : cherche un autre feu à traiter directement, sans passer par la caserne
                 List<FireDto> activeFires = fireClient.getAllFires();
@@ -164,21 +164,22 @@ public class VehicleMovementThread {
 
                 if (next.isEmpty()) {
                     // Aucun feu disponible → le véhicule est libéré (onDone le remettra à disposition)
-                    log.info("Véhicule {} — aucun feu disponible, retour libre", vehicle.getId());
+                    log.info("Véhicule {} opérationnel MAIS aucun feu disponible, retour libre", vehicle.getId());
                     break; // pour l'instant on ne le ramène pas à la caserne, il reste où il est
                 }
 
                 FireDto nextFire = next.get();
-                log.info("Véhicule {} : ressources suffisantes, direct sur feu #{} (sans caserne)",
-                        vehicle.getId(), nextFire.getId());
+                log.info("Véhicule {} : ressources suffisantes (liquid = {}, fuel = {}), direct sur feu #{} (sans caserne)",
+                        vehicle.getId(),vehicle.getLiquidQuantity(), vehicle.getFuelQuantity(), nextFire.getId());
                 // Réserve le nouveau feu atomiquement et libère l'ancien pour les autres véhicules
                 fireService.claimFire(vehicle.getId(), currentFire.getId(), nextFire.getId());
                 currentFire = nextFire; // reboucle sur la phase 1 avec le nouveau feu
             }
 
-        } catch (InsufficientResourcesException e) {
+        } catch (InsufficientResourcesException e) { // si jamais plus d'essence/liquide OU RAPPEL DES/DU véhicule demandé en cours de mission → on considère que le véhicule doit rentrer à la caserne pour se "recharger" (reset)
             needsRecharge = true;
             log.warn("[Mission] Véhicule {} abandonne la mission (feu #{}) — {}", vehicle.getId(), currentFire.getId(), e.getMessage());
+
         } catch (InterruptedException | IOException e) {
             needsRecharge = true;
             Thread.currentThread().interrupt();
@@ -190,7 +191,7 @@ public class VehicleMovementThread {
         } finally {
             try {
                 fireService.releaseFire(currentFire.getId());
-                if (needsRecharge) {
+                if (needsRecharge) { // soit rappel demandé des/du véhicule OU insuffisance liquid/essence OU erreur
                     try {
                         returnToFacility(vehicle);
                         waitForRecharge(vehicle.getId());
@@ -381,7 +382,7 @@ public class VehicleMovementThread {
         while (true) {
 
             // Check du mode rappel (global ou individuel) à chaque pas → abandonne immédiatement
-            if (phase == MovePhase.TO_FIRE && emergencyManagerService.isRecallRequested(vehicleId))
+            if (phase == MovePhase.TO_FIRE && emergencyManagerService.isRecallRequested(vehicleId)) // si rappel demandé lance une InsufficientResourcesException qui va être catch dans moveVehicle et qui va faire que le véhicule va abandonner sa mission et retourner à la caserne
                 throw new InsufficientResourcesException("rappel actif — abandon trajet vers feu");
             // Retour caserne : interrompu UNIQUEMENT si recallMode global devient OFF (les rappels individuels doivent finir leur trajet retour)
             if (phase == MovePhase.TO_FACILITY && !emergencyManagerService.isRecallMode()
@@ -442,7 +443,7 @@ public class VehicleMovementThread {
 
 
             FireDto current = fireClient.getFireById(fireId);
-            if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0) ou disparu → on sort
+            if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0, atention aux valeurs résiduelles !!!) ou disparu → on sort
 
             // Vérifie le niveau de liquide uniquement pour les véhicules avec réservoir (pas les ambulances)
             VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
@@ -471,6 +472,9 @@ public class VehicleMovementThread {
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
         movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), MovePhase.TO_FACILITY);
+        // test pour une autre caserne :
+        //movement_type(vehicle, teamUuid, 4.877449999999995, 45.772207882103, MovePhase.TO_FACILITY);
+
     }
 
     // ── Attente du rechargement à la caserne ──────────────────────────────────

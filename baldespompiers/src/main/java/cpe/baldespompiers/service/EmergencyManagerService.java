@@ -42,7 +42,7 @@ public class EmergencyManagerService {
     /** Mode "rappel" : quand actif, aucun nouveau dispatch et les missions en cours abandonnent pour rentrer. */
     private final AtomicBoolean recallMode = new AtomicBoolean(false);
 
-    /** IDs des véhicules à rappeler individuellement à la caserne (rappel unitaire). */
+    /** IDs des véhicules à rappeler individuellement à la caserne (rappel unitaire). */ //cheker dans moveVehicule via isRecallRequested
     private final Set<Integer> recallRequestedIds = ConcurrentHashMap.newKeySet();
 
     public boolean isRecallMode() { return recallMode.get(); }
@@ -50,7 +50,7 @@ public class EmergencyManagerService {
     public void disableRecallMode() { recallMode.set(false); log.info("=== Mode rappel désactivé, dispatch repris ==="); }
 
     public boolean isRecallRequested(Integer vehicleId) {
-        return recallMode.get() || recallRequestedIds.contains(vehicleId);
+        return recallMode.get() || recallRequestedIds.contains(vehicleId); // recallMode mis à True par VehicleRestcrt appelé par l'appui du boutton en html
     }
     public void requestRecall(Integer vehicleId) { recallRequestedIds.add(vehicleId); log.info("Rappel individuel demandé : véhicule {}", vehicleId); }
     public void clearRecallRequest(Integer vehicleId) { recallRequestedIds.remove(vehicleId); }

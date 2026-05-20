@@ -234,7 +234,7 @@ public class VehicleMovementThread {
         try {
             // Phase 1 : aller sur l'event
             movement_type(vehicle, teamUuid,
-                    event.getLon(), event.getLat(), MovePhase.TO_FIRE);
+                    event.getLon(), event.getLat(), MovePhase.TO_FIRE, null);
             vehicle.setLon(event.getLon());
             vehicle.setLat(event.getLat());
 

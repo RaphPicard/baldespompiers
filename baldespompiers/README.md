@@ -285,5 +285,5 @@ cpefighter/
 - Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel
 - Le boutton "Rappel tous les véhicules" dans le front-end : actuellement ne rappel que ceux qui sont en mission, les autres qui sont "libérés" ne sont pas rappelés → à patcher pour les faire rentrer aussi
-- faire en sorte que les vehicules captent si le feu sur lequel il est dispatché a été eteint entre temps (par d'autres equipes) et donc faire demi tour pour aller sur un autre feu si possible
+- faire en sorte que les vehicules captent si le feu sur lequel il est dispatché a été eteint entre temps sur la route pour y aller (par d'autres equipes) et donc faire demi tour pour aller sur un autre feu si possible
 - Changement de liquide automatiquement à la caserne

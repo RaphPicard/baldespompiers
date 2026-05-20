@@ -108,6 +108,10 @@ public class VehicleMovementThread {
     private static final class ResumeMissionException extends RuntimeException {
         ResumeMissionException(String msg) { super(msg, null, true, false); }
     }
+    // Signal : feu éteint par une autre équipe pendant le trajet vers lui
+    private static final class FireGoneException extends RuntimeException {
+        FireGoneException(String msg) { super(msg, null, true, false); }
+    }
 
     /** Contexte d'un déplacement : utilisé pour interpréter l'état recallMode. */
     public enum MovePhase {
@@ -131,8 +135,16 @@ public class VehicleMovementThread {
         boolean needsRecharge = false;
         try {
             while (true) {
-                // Phase 1 : déplacer le véhicule vers le feu (mode téléport, ligne droite ou route selon config)
-                movement_type(vehicle, teamUuid, currentFire.getLon(), currentFire.getLat(), MovePhase.TO_FIRE);
+                // Phase 1 : déplacer le véhicule vers le feu, en détectant si le feu est éteint en route
+                try {
+                    movement_type(vehicle, teamUuid, currentFire.getLon(), currentFire.getLat(), MovePhase.TO_FIRE, currentFire.getId());
+                } catch (FireGoneException e) {
+                    log.info("Véhicule {} : feu #{} éteint en route — recherche d'un autre feu", vehicle.getId(), currentFire.getId());
+                    FireDto redirect = redirectAfterFireGone(vehicle, currentFire);
+                    if (redirect == null) break; // aucun feu disponible → libère le véhicule
+                    currentFire = redirect;
+                    continue;
+                }
                 // Met à jour la position locale pour que les prochains calculs de distance partent du bon endroit
                 vehicle.setLon(currentFire.getLon());   // fix d'un bug... (à enlever ?)
                 vehicle.setLat(currentFire.getLat());
@@ -216,7 +228,7 @@ public class VehicleMovementThread {
     @Async("vehicleMovementExecutor")
     public void moveTo(VehicleDto vehicle, double lon, double lat) {
         try {
-            movement_type(vehicle, teamUuid, lon, lat, MovePhase.MANUAL);
+            movement_type(vehicle, teamUuid, lon, lat, MovePhase.MANUAL, null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Déplacement interrompu pour véhicule {}", vehicle.getId());
@@ -227,15 +239,16 @@ public class VehicleMovementThread {
 
     // ── Sélection du mode de déplacement ──────────────────────────────────────
 
-    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat, MovePhase phase)
+    private void movement_type(VehicleDto vehicle, String teamUuid, double lon, double lat, MovePhase phase,
+                               Integer targetFireId)
             throws InterruptedException, IOException {
         long vehicleDelay = computeStepDelay(vehicle.getType());
 
         if ("straight".equals(movementMode)) {
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay, phase);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), lon, lat, vehicle.getId(), vehicleDelay, phase, targetFireId);
 
         } else if ("road".equals(movementMode)) {
-            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay, phase);
+            moveFollower(vehicle, lon, lat, teamUuid, vehicleDelay, phase, targetFireId);
 
         } else {
             teleport(vehicle.getId(), lon, lat);
@@ -272,7 +285,8 @@ public class VehicleMovementThread {
      */
     private void moveFollower(VehicleDto vehicle,
                               double targetLon, double targetLat,
-                              String teamUuid, long vehicleDelay, MovePhase phase)
+                              String teamUuid, long vehicleDelay, MovePhase phase,
+                              Integer targetFireId)
             throws IOException, InterruptedException {
 
         // Construit l'URL OSRM : "lon_départ,lat_départ;lon_cible,lat_cible" avec géométrie complète
@@ -296,7 +310,7 @@ public class VehicleMovementThread {
         if (response.statusCode() != 200) {
             // OSRM injoignable ou surchargé → on déplace quand même le véhicule en ligne droite
             System.err.println("[OSRM] HTTP Error : " + response.statusCode() + " — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
             return;
         }
 
@@ -305,7 +319,7 @@ public class VehicleMovementThread {
         if (!"Ok".equals(root.path("code").asText())) {
             // OSRM n'a pas trouvé de route (feu hors réseau routier, zone isolée…) → fallback ligne droite
             System.err.println("[OSRM] Invalid response : " + root.path("code").asText() + " — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
             return;
         }
 
@@ -318,7 +332,7 @@ public class VehicleMovementThread {
         if (coordinates == null || !coordinates.isArray()) {
             // Réponse malformée → fallback ligne droite pour ne pas bloquer le véhicule
             System.err.println("[OSRM] No coordinates found — fallback ligne droite");
-            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
+            moveToPoint(vehicle.getLon(), vehicle.getLat(), targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
             return;
         }
 
@@ -334,7 +348,7 @@ public class VehicleMovementThread {
         for (int i = 1; i < waypoints.size(); i++) {
             double[] from = waypoints.get(i - 1);
             double[] to   = waypoints.get(i);
-            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay, phase);
+            moveToPoint(from[0], from[1], to[0], to[1], vehicle.getId(), vehicleDelay, phase, targetFireId);
         }
 
         // OSRM s'arrête à la route la plus proche. Si le feu est en dehors du réseau (forêt, champ…),
@@ -345,7 +359,7 @@ public class VehicleMovementThread {
             double dLat = targetLat - last[1];
             // peut etre : enlever le if et mettre dans tous les cas moveToPoint
             if (Math.sqrt(dLon * dLon + dLat * dLat) > stepSize) {
-                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay, phase);
+                moveToPoint(last[0], last[1], targetLon, targetLat, vehicle.getId(), vehicleDelay, phase, targetFireId);
             }
         }
 
@@ -372,12 +386,15 @@ public class VehicleMovementThread {
     /**
      * Déplace le véhicule pas à pas de (fromLon, fromLat) vers (toLon, toLat).
      * Lance InsufficientResourcesException si le carburant passe sous minFuel en cours de route.
+     * Lance FireGoneException si le feu cible (targetFireId) est éteint en cours de route.
      */
     private void moveToPoint(double fromLon, double fromLat,
                              double toLon, double toLat,
-                             Integer vehicleId, long vehicleDelay, MovePhase phase) throws InterruptedException {
+                             Integer vehicleId, long vehicleDelay, MovePhase phase,
+                             Integer targetFireId) throws InterruptedException {
         double currentLon = fromLon;
         double currentLat = fromLat;
+        long lastFireCheck = System.currentTimeMillis(); // pour vérifier périodiquement si le feu cible a été éteint en route, sans faire de check à chaque pas (pour ne pas surcharger le simulateur et les logs)
 
         while (true) {
 
@@ -389,6 +406,17 @@ public class VehicleMovementThread {
                     && !emergencyManagerService.isRecallRequested(vehicleId))
                 throw new ResumeMissionException("rappel terminé — abandon retour caserne");
 
+
+            // Vérifie périodiquement si le feu cible a été éteint par une autre équipe en cours de route
+            if (phase == MovePhase.TO_FIRE && targetFireId != null) {
+                long now = System.currentTimeMillis(); // pour éviter de faire un check à chaque pas, on vérifie seulement toutes les fireCheckDelayMs millisecondes
+                if (now - lastFireCheck >= fireCheckDelayMs) { // si le délai depuis le dernier check dépasse fireCheckDelayMs, on vérifie l'état du feu cible
+                    lastFireCheck = now;
+                    FireDto fire = fireClient.getFireById(targetFireId);
+                    if (fire == null || fire.getIntensity() <= 0)
+                        throw new FireGoneException("feu #" + targetFireId + " éteint en route par une autre équipe");
+                }
+            }
 
             // Calcule le vecteur restant à parcourir et sa longueur (en degrés)
             double dLon = toLon - currentLon;
@@ -425,6 +453,40 @@ public class VehicleMovementThread {
 
 
 
+
+    // ── Redirection après feu éteint en route ─────────────────────────────────
+
+    /**
+     * Appelée quand le feu cible est éteint avant que le véhicule n'y arrive.
+     * Libère le feu éteint, cherche un autre feu via findNextFireForVehicle et claimFire.
+     * Retourne le nouveau feu, ou null si aucun feu n'est disponible (le véhicule sera libéré).
+     */
+    private FireDto redirectAfterFireGone(VehicleDto vehicle, FireDto deadFire) {
+        fireService.releaseFire(deadFire.getId());
+
+        // Relit la position réelle du véhicule (il s'est arrêté en chemin)
+        VehicleDto refreshed = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
+        if (refreshed != null) {
+            vehicle.setLon(refreshed.getLon());
+            vehicle.setLat(refreshed.getLat());
+        }
+
+        List<FireDto> activeFires = fireClient.getAllFires();
+        Optional<FireDto> next = fireService.findNextFireForVehicle(
+                refreshed != null ? refreshed : vehicle,
+                activeFires != null ? activeFires : List.of());
+
+        if (next.isEmpty()) {
+            log.info("Véhicule {} : feu #{} éteint en route, aucun autre feu disponible — libération",
+                    vehicle.getId(), deadFire.getId());
+            return null;
+        }
+
+        FireDto nextFire = next.get();
+        fireService.claimFire(vehicle.getId(), deadFire.getId(), nextFire.getId());
+        log.info("Véhicule {} : redirigé vers feu #{} (car feu #{} éteint en route par une autre équipe)", vehicle.getId(), nextFire.getId(), deadFire.getId());
+        return nextFire;
+    }
 
     // ── Attente extinction du feu ─────────────────────────────────────────────
 
@@ -471,7 +533,7 @@ public class VehicleMovementThread {
         }
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
-        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), MovePhase.TO_FACILITY);
+        movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), MovePhase.TO_FACILITY, null);
         // test pour une autre caserne :
         //movement_type(vehicle, teamUuid, 4.877449999999995, 45.772207882103, MovePhase.TO_FACILITY);
 

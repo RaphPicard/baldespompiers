@@ -45,8 +45,8 @@ public class VehicleRestCrt {
     }
 
     @PutMapping("/{vehicleId}")
-    public VehicleDto updateVehicle(@PathVariable String vehicleId, @RequestBody VehicleDto dto) {
-        return vehicleClient.updateVehicle(this.team_uuid, vehicleId, dto);
+    public VehicleDto updateVehicle(@PathVariable String vehicleId, @RequestBody Map<String, Object> body) {
+        return vehicleClient.updateVehicleRaw(this.team_uuid, vehicleId, body);
     }
 
     /**
@@ -91,29 +91,23 @@ public class VehicleRestCrt {
 
     @GetMapping("/recall-mode")
     public Map<String, Object> getRecallMode() {
-        return Map.of("recallMode", emergencyManagerService.isRecallMode());
+        return Map.of(
+                "recallMode", emergencyManagerService.isRecallMode(),
+                "recalledIds", emergencyManagerService.getRecallRequestedIds()
+        );
     }
 
-    /**
-     * Rappel individuel : ramène UN véhicule à la caserne.
-     * - Si le véhicule est en mission : marque-le pour rappel (le thread en cours détectera et abandonnera)
-     * - Si le véhicule est libre : déclenche un déplacement direct vers la caserne via VehicleMovementThread
-     */
+    /** Active le rappel d'UN véhicule (toggle ON). */
     @PostMapping("/{vehicleId}/recall")
     public Map<String, Object> recallOne(@PathVariable Integer vehicleId) {
-        VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
-        if (vehicle == null) return Map.of("recalled", false, "reason", "vehicle not found");
-
         emergencyManagerService.requestRecall(vehicleId);
-
-        // Véhicule non en mission → on lance directement le retour caserne
-        if (!emergencyManagerService.isVehicleInMission(vehicleId)) {
-            if (vehicle.getFacilityRefID() != null) {
-                // On retombe sur l'endpoint move classique qui passe par moveTo (MANUAL)
-                // mais il faut récupérer les coordonnées de la caserne
-                // → délégué au front qui appellera /move avec les coords de la caserne
-            }
-        }
         return Map.of("recalled", true, "inMission", emergencyManagerService.isVehicleInMission(vehicleId));
+    }
+
+    /** Annule le rappel d'UN véhicule (toggle OFF) → il peut reprendre des missions. */
+    @DeleteMapping("/{vehicleId}/recall")
+    public Map<String, Object> cancelRecallOne(@PathVariable Integer vehicleId) {
+        emergencyManagerService.clearRecallRequest(vehicleId);
+        return Map.of("recalled", false);
     }
 }

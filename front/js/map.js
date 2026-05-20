@@ -62,7 +62,7 @@ const facilityIcon = L.divIcon({
 
 let fireMarkers = [];
 let vehicleMarkers = [];
-let facilityMarker = null;
+let facilityMarkers = [];
 
 async function fetchFires() {
   try {
@@ -107,19 +107,21 @@ async function fetchVehicles() {
   }
 }
 
-async function fetchFacility() {
+async function fetchFacilities() {
   try {
-    const res = await getFacility();
-    const facility = res.data;
-    if (facilityMarker) map.removeLayer(facilityMarker);
-    facilityMarker = L.marker([facility.lat, facility.lon], { icon: facilityIcon })
-      .bindPopup(`
-        <b>🏠 Caserne #${facility.id}</b><br/>
-        Nom : ${facility.name}<br/>
-        Véhicules : ${facility.vehicleIdSet.length} / ${facility.maxVehicleSpace}<br/>
-        Effectifs : ${facility.peopleIdSet.length} / ${facility.peopleCapacity}
-      `)
-      .addTo(map);
+    const res = await getFacilities();
+    facilityMarkers.forEach(m => map.removeLayer(m));
+    facilityMarkers = [];
+    res.data.forEach(facility => {
+      const marker = L.marker([facility.lat, facility.lon], { icon: facilityIcon })
+        .bindPopup(`
+          <b>🏠 ${facility.name} (#${facility.id})</b><br/>
+          Véhicules : ${facility.vehicleIdSet.length} / ${facility.maxVehicleSpace}<br/>
+          Effectifs : ${facility.peopleIdSet.length} / ${facility.peopleCapacity}
+        `)
+        .addTo(map);
+      facilityMarkers.push(marker);
+    });
   } catch (err) {
     console.error(err);
   }
@@ -127,12 +129,12 @@ async function fetchFacility() {
 
 fetchFires();
 fetchVehicles();
-fetchFacility();
+fetchFacilities();
 
 setInterval(() => {
   fetchFires();
   fetchVehicles();
-  fetchFacility();
+  fetchFacilities();
 }, 3000);
 
 // pour push

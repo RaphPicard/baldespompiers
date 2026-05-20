@@ -74,14 +74,16 @@ public class VehicleClient {
                 .block();
     }
 
-    /** Variante "raw" : Map au lieu de DTO pour contourner le bug Jackson 2/3 sur @RequestBody. */
+    /** Variante "raw" : Map au lieu de DTO pour contourner le bug Jackson 2/3 sur @RequestBody.
+     *  Le simulateur renvoie souvent un body vide pour cet endpoint → on utilise toBodilessEntity. */
     public VehicleDto updateVehicleRaw(String teamUuid, String vehicleId, Map<String, Object> body) {
-        return webClient.put()
+        webClient.put()
                 .uri("/vehicle/{teamuuid}/{id}", teamUuid, vehicleId)
                 .bodyValue(body)
                 .retrieve()
-                .bodyToMono(VehicleDto.class)
+                .toBodilessEntity()
                 .block();
+        return null;
     }
 
     /** Appel clé pour le déplacement progressif — appelé en boucle par VehicleMovementThread */

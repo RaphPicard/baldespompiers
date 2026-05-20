@@ -173,19 +173,12 @@ public class FireService {
                 .filter(v -> v.getCrewMember() >= readyCrew);
     }
 
-
-
-
-
-
-
-
     // ── Protection caserne ─────────────────────────────────────────────────────
 
     /** Charge les coordonnées de notre caserne une seule fois via notre teamUuid. */
     private void ensureCaserneCoords() {
         if (!Double.isNaN(caserneLon)) return; // déjà chargé
-        List<FacilityDto> facilities = facilityClient.getFacilityById(teamUuid);
+        List<FacilityDto> facilities = facilityClient.getAllFacilities(teamUuid);
         if (facilities == null || facilities.isEmpty()) return;
         FacilityDto f = facilities.get(0); // on suppose qu'il n'y a qu'une caserne par équipe
         caserneLon = f.getLon();

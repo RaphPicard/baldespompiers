@@ -46,13 +46,19 @@ public class EmergencyManagerService {
     }
 
     // ── Recall ────────────────────────────────────────────────────────────────
-    public boolean isRecallMode()                        { return recallMode.get(); }
-    public void enableRecallMode()                       { recallMode.set(true);  log.warn("=== MODE RAPPEL ACTIVÉ ==="); }
-    public void disableRecallMode()                      { recallMode.set(false); log.info("=== Mode rappel désactivé ==="); }
-    public boolean isRecallRequested(Integer vehicleId)  { return recallMode.get() || recallRequestedIds.contains(vehicleId); }
-    public void requestRecall(Integer vehicleId)         { recallRequestedIds.add(vehicleId); log.info("Rappel individuel demandé : véhicule {}", vehicleId); }
-    public void clearRecallRequest(Integer vehicleId)    { recallRequestedIds.remove(vehicleId); }
+    /** IDs des véhicules à rappeler individuellement à la caserne (rappel unitaire). */ //cheker dans moveVehicule via isRecallRequested
+
+    public boolean isRecallMode() { return recallMode.get(); }
+    public void enableRecallMode() { recallMode.set(true); log.warn("=== MODE RAPPEL ACTIVÉ ==="); }
+    public void disableRecallMode() { recallMode.set(false); log.info("=== Mode rappel désactivé, dispatch repris ==="); }
+
+    public boolean isRecallRequested(Integer vehicleId) {
+        return recallMode.get() || recallRequestedIds.contains(vehicleId);
+    }
+    public void requestRecall(Integer vehicleId) { recallRequestedIds.add(vehicleId); log.info("Rappel individuel demandé : véhicule {}", vehicleId); }
+    public void clearRecallRequest(Integer vehicleId) { recallRequestedIds.remove(vehicleId); log.info("Rappel individuel annulé : véhicule {}", vehicleId); }
     public boolean isVehicleInMission(Integer vehicleId) { return vehicleStates.containsKey(vehicleId); }
+    public Set<Integer> getRecallRequestedIds() { return recallRequestedIds; }
 
     // ── Dispatch feux ─────────────────────────────────────────────────────────
     public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {

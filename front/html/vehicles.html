@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://code.jquery.com/jquery-3.7.1.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js" defer></script>
@@ -9,84 +10,123 @@
   <script src="../js/api.js" defer></script>
   <script src="../js/header.js" defer></script>
   <script src="../js/vehicles.js" defer></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .glass { background: rgba(255,255,255,0.7); backdrop-filter: blur(10px); }
+    .progress-bar { transition: width 0.4s ease; }
+    .card-hover { transition: all 0.2s ease; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+  </style>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 min-h-screen">
 <div id="header"></div>
 
-<div class="p-6 flex gap-6">
+<div class="max-w-7xl mx-auto p-6 flex flex-col gap-6">
 
-  <!-- Liste des véhicules -->
-  <div class="flex-1 bg-white rounded-xl shadow p-6">
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-xl font-bold">Mes véhicules</h2>
-      <button id="recall-btn" onclick="recallAllVehicles()" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold rounded px-4 py-2 text-sm">
-        🏠 Rappeler à la caserne
-      </button>
-    </div>
-    <p id="recall-status" class="text-sm text-gray-500 mb-3"></p>
-    <div id="vehicle-list" class="flex flex-col gap-3">
-      <p class="text-gray-400">Chargement...</p>
+  <!-- Bandeau header avec stats globales -->
+  <div class="bg-gradient-to-r from-orange-500 via-red-500 to-rose-600 rounded-2xl shadow-xl p-6 text-white">
+    <div class="flex justify-between items-start flex-wrap gap-4">
+      <div>
+        <h1 class="text-3xl font-extrabold tracking-tight">🚒 Flotte des véhicules</h1>
+        <p class="text-orange-100 text-sm mt-1">Pilotage en temps réel — refresh auto toutes les 3s</p>
+      </div>
+      <div id="global-stats" class="flex gap-3 flex-wrap"></div>
     </div>
   </div>
 
-  <!-- Créer un véhicule -->
-  <div class="w-80 bg-white rounded-xl shadow p-6">
-    <h2 class="text-xl font-bold mb-4">Créer un véhicule</h2>
-
-    <div class="flex flex-col gap-3">
-      <label class="flex flex-col gap-1 text-sm font-medium">
-        Type
-        <select id="type" class="border rounded p-2">
-          <option>CAR</option>
-          <option>FIRE_ENGINE</option>
-          <option>PUMPER_TRUCK</option>
-          <option>WATER_TENDERS</option>
-          <option>TURNTABLE_LADDER_TRUCK</option>
-          <option>TRUCK</option>
-          <option>EMERGENCY_AMBULANCE</option>
-        </select>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm font-medium">
-        Liquide
-        <select id="liquidType" class="border rounded p-2">
-          <option>ALL</option>
-          <option>WATER</option>
-          <option>POWDER</option>
-          <option>SPECIAL_POWDER</option>
-          <option>CARBON_DIOXIDE</option>
-          <option>FOAM</option>
-        </select>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm font-medium">
-        Équipage
-        <input id="crewMember" type="number" value="4" class="border rounded p-2"/>
-      </label>
-
-      <label class="flex flex-col gap-1 text-sm font-medium">
-        Caserne
-        <select id="facilityRefID" class="border rounded p-2"></select>
-      </label>
-
-      <button onclick="submitCreateVehicle()" class="bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded p-2 mt-2">
-        Créer
-      </button>
-
-      <p id="create-status" class="text-sm text-center text-gray-500"></p>
+  <!-- Capacités des casernes -->
+  <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+        <span class="text-2xl">🏠</span> Capacités des casernes
+      </h2>
+    </div>
+    <div id="facility-capacity" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <p class="text-slate-400">Chargement...</p>
     </div>
   </div>
 
+  <div class="flex gap-6 flex-col lg:flex-row">
+
+    <!-- Liste des véhicules -->
+    <div class="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+      <div class="flex justify-between items-center mb-5 flex-wrap gap-3">
+        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <span class="text-2xl">🚒</span> Mes véhicules
+        </h2>
+        <button id="recall-btn" onclick="recallAllVehicles()"
+          class="bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg px-4 py-2 text-sm shadow-sm transition-colors">
+          🏠 Rappeler à la caserne
+        </button>
+      </div>
+      <p id="recall-status" class="text-sm text-slate-500 mb-3"></p>
+      <div id="vehicle-list" class="flex flex-col gap-3">
+        <p class="text-slate-400">Chargement...</p>
+      </div>
+    </div>
+
+    <!-- Créer un véhicule -->
+    <div class="w-full lg:w-80 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 h-fit lg:sticky lg:top-6">
+      <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2 mb-5">
+        <span class="text-2xl">➕</span> Créer un véhicule
+      </h2>
+
+      <div class="flex flex-col gap-4">
+        <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
+          Type
+          <select id="type" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition">
+            <option>CAR</option>
+            <option>FIRE_ENGINE</option>
+            <option>PUMPER_TRUCK</option>
+            <option>WATER_TENDERS</option>
+            <option>TURNTABLE_LADDER_TRUCK</option>
+            <option>TRUCK</option>
+            <option>EMERGENCY_AMBULANCE</option>
+          </select>
+        </label>
+
+        <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
+          Liquide
+          <select id="liquidType" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition">
+            <option>ALL</option>
+            <option>WATER</option>
+            <option>POWDER</option>
+            <option>SPECIAL_POWDER</option>
+            <option>CARBON_DIOXIDE</option>
+            <option>FOAM</option>
+          </select>
+        </label>
+
+        <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
+          Équipage
+          <input id="crewMember" type="number" value="4" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition"/>
+        </label>
+
+        <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
+          Caserne
+          <select id="facilityRefID" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition"></select>
+        </label>
+
+        <button onclick="submitCreateVehicle()"
+          class="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-lg p-2.5 mt-2 shadow-sm transition-all">
+          Créer le véhicule
+        </button>
+
+        <p id="create-status" class="text-sm text-center text-slate-500"></p>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <!-- Modal édition véhicule -->
-<div id="edit-modal" class="hidden fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-  <div class="bg-white rounded-xl shadow-xl p-6 w-96">
-    <h2 class="text-xl font-bold mb-4">Modifier véhicule <span id="edit-vehicle-id"></span></h2>
-    <div class="flex flex-col gap-3">
-      <label class="flex flex-col gap-1 text-sm font-medium">
+<div id="edit-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md">
+    <h2 class="text-xl font-bold text-slate-800 mb-5">✏️ Modifier véhicule <span id="edit-vehicle-id" class="text-orange-500"></span></h2>
+    <div class="flex flex-col gap-4">
+      <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
         Type de liquide
-        <select id="edit-liquidType" class="border rounded p-2">
+        <select id="edit-liquidType" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition">
           <option>ALL</option>
           <option>WATER</option>
           <option>POWDER</option>
@@ -95,19 +135,19 @@
           <option>FOAM</option>
         </select>
       </label>
-      <label class="flex flex-col gap-1 text-sm font-medium">
+      <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
         Équipage
-        <input id="edit-crewMember" type="number" min="0" class="border rounded p-2"/>
+        <input id="edit-crewMember" type="number" min="0" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition"/>
       </label>
       <div class="flex gap-2 mt-2">
-        <button onclick="submitEditVehicle()" class="flex-1 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded p-2">
+        <button onclick="submitEditVehicle()" class="flex-1 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-lg p-2.5 shadow-sm transition-all">
           Sauvegarder
         </button>
-        <button onclick="closeEditModal()" class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded p-2">
+        <button onclick="closeEditModal()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg p-2.5 transition-colors">
           Annuler
         </button>
       </div>
-      <p id="edit-status" class="text-sm text-center text-gray-500"></p>
+      <p id="edit-status" class="text-sm text-center text-slate-500"></p>
     </div>
   </div>
 </div>

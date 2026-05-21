@@ -1,14 +1,38 @@
-const FACILITY_LAT = 45.73158119172101;
-const FACILITY_LON = 4.890602482113532;
 const FACILITY_TOLERANCE = 0.0005; // ~50m
 
-function isAtFacility(v) {
-  return Math.abs(v.lat - FACILITY_LAT) < FACILITY_TOLERANCE
-      && Math.abs(v.lon - FACILITY_LON) < FACILITY_TOLERANCE;
+// Caches partagés
+let facilitiesCache = [];
+let vehiclesCache = [];
+
+async function loadFacilities() {
+  try {
+    const res = await getFacilities();
+    facilitiesCache = res.data;
+    // Peuple le select du formulaire de création si présent
+    const sel = document.getElementById('facilityRefID');
+    if (sel) {
+      const current = sel.value;
+      sel.innerHTML = facilitiesCache
+        .map(f => `<option value="${f.id}">${f.name} (#${f.id})</option>`)
+        .join('');
+      if (current) sel.value = current;
+    }
+  } catch (err) {
+    console.error('Erreur chargement casernes:', err);
+  }
 }
 
-// Cache des véhicules pour l'édition (évite un fetch supplémentaire)
-let vehiclesCache = [];
+// True si le véhicule est dans la tolérance d'AU MOINS une caserne
+function isAtFacility(v) {
+  return facilitiesCache.some(f =>
+       Math.abs(v.lat - f.lat) < FACILITY_TOLERANCE
+    && Math.abs(v.lon - f.lon) < FACILITY_TOLERANCE);
+}
+
+function facilityLabelOf(v) {
+  const f = facilitiesCache.find(x => x.id === v.facilityRefID);
+  return f ? `${f.name} (#${f.id})` : `#${v.facilityRefID}`;
+}
 
 async function loadVehicles() {
   const [vRes, rRes] = await Promise.all([getVehicles(), getRecallMode()]);
@@ -42,6 +66,7 @@ async function loadVehicles() {
       <div class="border rounded-lg p-3 flex justify-between items-center">
         <div>
           <p class="font-semibold">🚒 #${v.id} — ${v.type}${statusBadge}</p>
+          <p class="text-sm text-gray-500">Caserne : ${facilityLabelOf(v)}</p>
           <p class="text-sm text-gray-500">Liquide : ${v.liquidType} (${v.liquidQuantity}L)</p>
           <p class="text-sm text-gray-500">Carburant : ${v.fuel}L — Équipage : ${v.crewMember}</p>
         </div>
@@ -103,17 +128,17 @@ async function submitEditVehicle() {
 }
 
 async function toggleRecallOne(id, isCurrentlyRecalled) {
-  const FACILITY_LAT = 45.73158119172101;
-  const FACILITY_LON = 4.890602482113532;
   try {
     if (isCurrentlyRecalled) {
       // Annule le rappel → véhicule peut reprendre les missions
       await cancelRecallOneVehicle(id);
     } else {
-      // Active le rappel individuel → ramène à la caserne
+      // Active le rappel individuel → ramène à SA caserne d'attache
       const res = await recallOneVehicle(id);
       if (!res.data.inMission) {
-        await moveVehicle(id, FACILITY_LAT, FACILITY_LON);
+        const v = vehiclesCache.find(x => x.id === id);
+        const f = v && facilitiesCache.find(x => x.id === v.facilityRefID);
+        if (f) await moveVehicle(id, f.lat, f.lon);
       }
     }
     loadVehicles();
@@ -146,7 +171,7 @@ async function submitCreateVehicle() {
     type: document.getElementById('type').value,
     liquidType: document.getElementById('liquidType').value,
     crewMember: Number(document.getElementById('crewMember').value),
-    facilityRefID: FACILITY_ID
+    facilityRefID: Number(document.getElementById('facilityRefID').value)
   };
 
   try {
@@ -186,4 +211,7 @@ async function recallAllVehicles() {
   }
 }
 
-loadVehicles();
+(async () => {
+  await loadFacilities();
+  await loadVehicles();
+})();

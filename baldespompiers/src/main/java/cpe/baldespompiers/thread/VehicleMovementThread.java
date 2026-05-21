@@ -126,8 +126,8 @@ public class VehicleMovementThread {
     public enum MovePhase {
         TO_FIRE,            // recall actif → abandonne, retourne caserne
         TO_EVENT,           // idem TO_FIRE mais cible un event (blessé/accident)
-        TO_FACILITY,        // retour recall : interruptible si recall désactivé en cours de route
-        MANUAL              // ignore recallMode (déplacement libre)
+        TO_FACILITY,        // ignore recallMode (déplacement libre)
+        MANUAL              // retour recall : interruptible si recall désactivé en cours de route
     }
 
     // ── Après exctinction d'un feu ? ───────────────────────────────────────────
@@ -174,7 +174,13 @@ public class VehicleMovementThread {
                 vehicle.setLat(refreshed.getLat());
 
                 // Si les ressources sont trop basses, le véhicule doit rentrer à la caserne (break --> finally) se recharger
-                if (vehicleNeedsRecharge(refreshed)) { needsRecharge = true; break; } //break sort de la boucle While(true) et va au error/exeption et finally !!!
+                if (vehicleNeedsRecharge(refreshed)) {
+                    needsRecharge = true;
+                    log.warn("[Mission] Véhicule {} : ressources insuffisantes après feu #{} (fuel={} liquid={}) --> Retour CASERNE",
+                            vehicle.getId(), currentFire.getId(),
+                            refreshed.getFuelQuantity(), refreshed.getLiquidQuantity());
+                    break;
+                } //break sort de la boucle While(true) et va au error/exeption et finally !!!
 
                 // Mode rappel (global ou individuel) : retour immédiat à la caserne, même si ressources OK
                 if (emergencyManagerService.isRecallRequested(vehicle.getId())) { needsRecharge = true; break; } //isRecallrequested renvoie le bouléen de recall mis à true par l'appui du boutton "Rappeler" en html
@@ -355,7 +361,7 @@ public class VehicleMovementThread {
     @Async("vehicleMovementExecutor")
     public void moveTo(VehicleDto vehicle, double lon, double lat) {
         try {
-            movement_type(vehicle, teamUuid, lon, lat, MovePhase.MANUAL, null);
+            movement_type(vehicle, teamUuid, lon, lat, MovePhase.TO_FACILITY, null);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("Déplacement interrompu pour véhicule {}", vehicle.getId());
@@ -467,7 +473,7 @@ public class VehicleMovementThread {
             waypoints.add(new double[]{ coord.get(0).asDouble(), coord.get(1).asDouble() });
         }
 
-        log.info("[OSRM] {} waypoints pour véhicule {}", waypoints.size(), vehicle.getId());
+        log.info("[OSRM] {} waypoints pour véhicule {}, phase={}", waypoints.size(), vehicle.getId(), phase);
 
         // Parcourt chaque segment de route un par un (de waypoint[i-1] à waypoint[i])
         for (int i = 1; i < waypoints.size(); i++) {
@@ -526,7 +532,7 @@ public class VehicleMovementThread {
                     && emergencyManagerService.isRecallRequested(vehicleId))
                 throw new InsufficientResourcesException("rappel actif — abandon trajet");
             // Retour caserne : interrompu UNIQUEMENT si recallMode global devient OFF (les rappels individuels doivent finir leur trajet retour)
-            if (phase == MovePhase.TO_FACILITY && !emergencyManagerService.isRecallMode()
+            if (phase == MovePhase.MANUAL && !emergencyManagerService.isRecallMode()
                     && !emergencyManagerService.isRecallRequested(vehicleId))
                 throw new ResumeMissionException("rappel terminé — abandon retour caserne");
 
@@ -706,11 +712,11 @@ public class VehicleMovementThread {
         }
         FacilityDto facility = facilityClient.getFacilityById(String.valueOf(vehicle.getFacilityRefID()));
         if (facility == null) return;
-        // Recall actif → TO_FACILITY (interruptible si recall annulé en cours de route)
-        // Pas de recall → retour pour ressources épuisées → MANUAL (va toujours jusqu'au bout)
+        // Recall actif → MANUAL (interruptible si recall annulé en cours de route)
+        // Pas de recall → retour pour ressources épuisées → TO_FACILITY (va toujours jusqu'au bout)
         boolean isRecall = emergencyManagerService.isRecallMode()
                         || emergencyManagerService.isRecallRequested(vehicle.getId());
-        MovePhase phase = isRecall ? MovePhase.TO_FACILITY : MovePhase.MANUAL; // pour ne pas declencher ResumeMissionException en cas de retour pour ressources épuisées
+        MovePhase phase = isRecall ? MovePhase.MANUAL : MovePhase.TO_FACILITY; // pour ne pas declencher ResumeMissionException en cas de retour pour ressources épuisées
         movement_type(vehicle, teamUuid, facility.getLon(), facility.getLat(), phase, null);
     }
 

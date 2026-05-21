@@ -276,15 +276,16 @@ cpefighter/
 - **FAIT** : faire en sorte que les vehicules captent si le feu sur lequel il est dispatché a été eteint entre temps sur la route (par d'autres equipes) → demi-tour vers un autre feu si possible via `FireGoneException` + `redirectAfterFireGone`
 - **FAIT** : distance prise en compte dans le score via `distanceWeight` (×300) dans `vehicleScore` — un véhicule proche est favorisé, ce qui couvre implicitement les waypoints OSRM (plus de waypoints = plus de distance = score plus bas)
 - **FAIT** : dispatch pour les events (`road_accident` & `personal_injury`) — `RPEventService.dispatchEvents()` score et affecte les véhicules aux événements ; `moveVehicleToEvent()` gère le déplacement, l'attente de résolution, la redirection si l'event est résolu en route (`redirectAfterEventGone`) et le retour caserne si ressources insuffisantes
-
+- Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et rentre à la caserne → à changer ?
 
 # @TODO :
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
 - actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
 - STARTEGIE : Laisser les feux à environ 3 ou 4 d'intensité, les considérer comme éteint et laisser les autres equipes aller les finir pour qu'elles perdent du temps (à patcher si toutes les equipes trient les feux par ordre d'intensité décroissante)
-- Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et ne rentre PAS à la caserne → à changer ? ou on le laisse où il est à disposition
+
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel.  pour savoir s'il doit faire le plein avant de partir ou pas
 - Changement de liquide automatiquement à la caserne si un véhicule n'a pas de feu de son type de liquide à eteindre, pour éviter qu'il attente à la caserne alors qu'il pourrait être utile sur un feu d'un autre type (ex : un véhicule à eau qui attend alors qu'il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
 - Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
 - Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d'origine)
+- Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l'intensité du feu (pour éviter les retours à la caserne inutiles)

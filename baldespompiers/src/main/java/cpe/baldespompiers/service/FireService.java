@@ -202,7 +202,7 @@ public class FireService {
      */
     private void handleCasernefire(FireDto fire, FacilityDto caserne, List<VehicleDto> vehicles) {
         // Tier 0a : véhicule libre compatible → dispatch immédiat
-        Optional<VehicleDto> free = candidates(vehicles, fire)
+        Optional<VehicleDto> free = candidates(vehicles, fire) // ne prend que les dispos
                 .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
         if (free.isPresent()) {
             log.error("=== FEU CASERNE '{}' #{} — dispatch immédiat véhicule {} ===", caserne.getName(), fire.getId(), free.get().getId());
@@ -213,7 +213,7 @@ public class FireService {
         // Cooldown : ne pas rappeler plusieurs fois pour le même feu
         Long last = recallIssuedAt.get(fire.getId());
         if (last != null && System.currentTimeMillis() - last < recallCooldownMs) {
-            log.debug("Feu caserne #{} — rappel déjà en cours, attente de 30s", fire.getId());
+            log.debug("Feu #{} caserne {} — rappel déjà en cours, attente de 30s", fire.getId(), caserne.getId());
             return;
         }
 

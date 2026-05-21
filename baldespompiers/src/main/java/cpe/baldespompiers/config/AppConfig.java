@@ -49,7 +49,7 @@ public class AppConfig implements WebMvcConfigurer {
      * Ce Bean est référencé par son nom "vehicleMovementExecutor" dans @Async("vehicleMovementExecutor").
      *
      * Paramètres du pool :
-     *   - corePoolSize  : 5  → 5 threads toujours actifs (même sans tâche en cours)
+     *   - corePoolSize  : 20  → 20 threads toujours actifs (même sans tâche en cours)
      *   - maxPoolSize   : 20 → jusqu'à 20 threads simultanés si la charge est forte
      *   - queueCapacity : 50 → si les 20 threads sont occupés, jusqu'à 50 déplacements
      *                          peuvent attendre en file ; au-delà, les nouveaux sont rejetés

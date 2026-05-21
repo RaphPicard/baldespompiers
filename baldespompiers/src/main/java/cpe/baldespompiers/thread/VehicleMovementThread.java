@@ -72,6 +72,9 @@ public class VehicleMovementThread {
     @Value("${movement.fire.check.delay.ms:3000}")
     private long fireCheckDelayMs;
 
+    @Value("${dispatch.abandon.intensity:4}")
+    private int abandonIntensity;
+
     // Seuils d'abandon de mission (mêmes valeurs que dans EmergencyManagerService)
     @Value("${dispatch.give_up.fuel:10.0}")
     private float giveUpFuel;
@@ -547,8 +550,8 @@ public class VehicleMovementThread {
                     lastCheck = now;
                     if (phase == MovePhase.TO_FIRE) {
                         FireDto fire = fireClient.getFireById(targetId);
-                        if (fire == null || fire.getIntensity() <= 0)
-                            throw new FireGoneException("feu #" + targetId + " éteint en route par une autre équipe");
+                        if (fire == null || fire.getIntensity() <= abandonIntensity)
+                            throw new FireGoneException("feu #" + targetId + " quasi-éteint (≤" + abandonIntensity + ") — laissé aux autres équipes");
                     } else if (phase == MovePhase.TO_EVENT) {
                         EmergencyEventDto ev = rpEventClient.getEventById(targetId);
                         if (ev == null) {
@@ -653,7 +656,7 @@ public class VehicleMovementThread {
 
 
             FireDto current = fireClient.getFireById(fireId);
-            if (current == null || current.getIntensity() <= 0) break; // feu éteint (intensity = 0, atention aux valeurs résiduelles !!!) ou disparu → on sort
+            if (current == null || current.getIntensity() <= abandonIntensity) break; // feu éteint ou quasi-éteint (≤ seuil) → on laisse aux autres équipes
 
             // Vérifie le niveau de liquide uniquement pour les véhicules avec réservoir (pas les ambulances)
             VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));

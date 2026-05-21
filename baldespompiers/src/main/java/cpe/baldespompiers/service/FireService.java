@@ -49,6 +49,9 @@ public class FireService {
     /** Timestamp du dernier rappel émis par fire ID, pour éviter les rappels répétés. Pour le feu à la caserne */
     private final Map<Integer, Long> recallIssuedAt = new ConcurrentHashMap<>();
 
+    @Value("${dispatch.abandon.intensity:4}")
+    private int abandonIntensity;
+
     // Seuil absolu : en dessous, le véhicule est exclu du dispatch
     @Value("${dispatch.min.fuel:10.0}")
     private float minFuel;
@@ -261,6 +264,7 @@ public class FireService {
         // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
         // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)
         List<FireDto> sortedFires = fires.stream()
+                .filter(f -> f.getIntensity() > abandonIntensity) // laisse les feux quasi-éteints aux autres équipes
                 .sorted(Comparator
                 // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
                 .comparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
@@ -322,7 +326,7 @@ public class FireService {
      */
     public Optional<FireDto> findNextFireForVehicle(VehicleDto vehicle, List<FireDto> activeFires) {
         return activeFires.stream()
-                .filter(f -> f.getIntensity() > 0)                                   // ignore les feux déjà éteints
+                .filter(f -> f.getIntensity() > abandonIntensity)                    // ignore les feux éteints ou quasi-éteints (laissés aux autres équipes)
                 .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris
                 .filter(f -> isLiquidCompatible(vehicle.getLiquidType(), f.getType())) // liquide efficace requis
                 .max(Comparator.comparingDouble(f -> vehicleScore(vehicle, f)));      // prend le feu pour lequel ce véhicule est le plus efficace

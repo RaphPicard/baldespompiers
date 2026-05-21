@@ -702,9 +702,10 @@ public class VehicleMovementThread {
 
             if (allTreated) break;
 
-            log.info("[Event #{}] {} blessés en cours de traitement",
-                    eventId, current.getInjuredPeopleDtoList().size());
-            Thread.sleep(fireCheckDelayMs);
+            long remaining = current.getInjuredPeopleDtoList().stream()
+                    .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0)
+                    .count();
+            log.info("[Event #{}] {} blessés restants à traiter", eventId, remaining);
         }
     }
 

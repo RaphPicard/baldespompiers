@@ -180,6 +180,7 @@ public class FireService {
     private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles, FireDto fire) {
         return candidates(vehicles, fire)
                 .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getFuelQuantity() >= readyFuel)
                 .filter(v -> v.getLiquidQuantity() >= readyLiquid)

@@ -550,8 +550,9 @@ public class VehicleMovementThread {
                     lastCheck = now;
                     if (phase == MovePhase.TO_FIRE) {
                         FireDto fire = fireClient.getFireById(targetId);
-                        if (fire == null || fire.getIntensity() <= abandonIntensity)
-                            throw new FireGoneException("feu #" + targetId + " quasi-éteint (≤" + abandonIntensity + ") — laissé aux autres équipes");
+                        int fireThreshold = (fire != null && fireService.isCaserneFire(fire)) ? 0 : abandonIntensity;
+                        if (fire == null || fire.getIntensity() <= fireThreshold)
+                            throw new FireGoneException("feu #" + targetId + " quasi-éteint (≤" + fireThreshold + ") — laissé aux autres équipes");
                     } else if (phase == MovePhase.TO_EVENT) {
                         EmergencyEventDto ev = rpEventClient.getEventById(targetId);
                         if (ev == null) {
@@ -647,6 +648,10 @@ public class VehicleMovementThread {
      * dont le type a une capacité liquide > 0 ==> pour que ca traite pas les ambulances).
      */
     private void waitForFireOut(Integer fireId, Integer vehicleId) throws InterruptedException {
+        FireDto initial = fireClient.getFireById(fireId);
+        int threshold = (initial != null && fireService.isCaserneFire(initial)) ? 0 : abandonIntensity; // seuil d'abandon à 0 si le feu est sur notre caserne !!!
+        int lastIntensity = -1;
+
         while (true) {
 
             // Mode rappel (global ou individuel) : abandonne immédiatement → catch → retour caserne
@@ -656,7 +661,7 @@ public class VehicleMovementThread {
 
 
             FireDto current = fireClient.getFireById(fireId);
-            if (current == null || current.getIntensity() <= abandonIntensity) { // feu éteint ou quasi-éteint (≤ seuil) → on laisse aux autres équipes
+            if (current == null || current.getIntensity() <= threshold) {
                 log.info("Feu #{} éteint ou quasi-éteint (intensité={}), laissé pour les autres équipes : abandonné par véhicule {}",
                         fireId, current != null ? current.getIntensity() : "N/A", vehicleId);
                 break;
@@ -670,13 +675,18 @@ public class VehicleMovementThread {
                 // Plus assez de liquide pour continuer → abandonne la mission et rentre à la caserne
                 throw new InsufficientResourcesException("liquide insuffisant (liquid=" + vehicle.getLiquidQuantity() + ")");
 
-            log.info("[Feu #{}] intensité = {}", fireId, current.getIntensity());
-            Thread.sleep(fireCheckDelayMs); // attend quelques secondes avant de revérifier
+            int intensity = current.getIntensity();
+            if (intensity != lastIntensity) {
+                log.info("[Feu #{}] intensité = {}", fireId, intensity);
+                lastIntensity = intensity;
+            }
+            Thread.sleep(fireCheckDelayMs);
         }
     }
 
     // ── Attente résolution event ──────────────────────────────────────────────
     private void waitForEventOut(Integer eventId, Integer vehicleId) throws InterruptedException {
+        int lastIntensity = -1;
         while (true) {
             if (emergencyManagerService.isRecallRequested(vehicleId))
                 throw new InsufficientResourcesException("rappel actif");
@@ -686,7 +696,11 @@ public class VehicleMovementThread {
 
             // Cas 1 : event avec intensité → attendre qu'elle descende à 0
             if (current.getIntensity() > 0) {
-                log.info("[Event #{}] intensité = {}", eventId, current.getIntensity());
+                int intensity = current.getIntensity();
+                if (intensity != lastIntensity) {
+                    log.info("[Event #{}] intensité = {}", eventId, intensity);
+                    lastIntensity = intensity;
+                }
                 Thread.sleep(fireCheckDelayMs);
                 continue;
             }
@@ -702,10 +716,7 @@ public class VehicleMovementThread {
 
             if (allTreated) break;
 
-            long remaining = current.getInjuredPeopleDtoList().stream()
-                    .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0)
-                    .count();
-            log.info("[Event #{}] {} blessés restants à traiter", eventId, remaining);
+            // blessés restants : log centralisé dans EventPollerThread
         }
     }
 
@@ -746,15 +757,23 @@ public class VehicleMovementThread {
 
         log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})", vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
 
+        float lastFuel   = vehicle.getFuelQuantity();
+        float lastLiquid = vehicle.getLiquidQuantity();
         while (true) {
-            Thread.sleep(fireCheckDelayMs); // le rechargement est progressif, on recheck régulièrement
+            Thread.sleep(fireCheckDelayMs);
             vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
             if (vehicle == null) break;
             boolean fuelOk   = vehicle.getFuelQuantity()  >= readyFuel;
             // Les ambulances (liquidCapacity == 0) sont toujours considérées "ok" côté liquide
             boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= readyLiquid;
-            if (fuelOk && liquidOk) break; // les deux ressources sont au niveau requis → le véhicule est prêt
-            log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
+            if (fuelOk && liquidOk) break;
+            float fuel   = vehicle.getFuelQuantity();
+            float liquid = vehicle.getLiquidQuantity();
+            if (fuel != lastFuel || liquid != lastLiquid) {
+                log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, fuel, liquid);
+                lastFuel   = fuel;
+                lastLiquid = liquid;
+            }
         }
         log.info("Véhicule {} rechargé — prêt pour une nouvelle mission", vehicleId);
     }

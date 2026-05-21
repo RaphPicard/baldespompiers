@@ -294,4 +294,4 @@ cpefighter/
 - Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
 
 - Attention : notre strategie (laisser les feux à 4 d'intensité) va aussi laisser les feux qui sont sur nos casernes à 4 et ne jamais l'eteindre -> à corriger
-- Rappel forcé si feu caserne -> a rappeler une ambulance au lieu d'un camion de mompier avec le bon anti-feu
+- Rappel forcé si feu caserne -> là ça a rappeler une ambulance au lieu d'un camion de mompier avec le bon anti-feu

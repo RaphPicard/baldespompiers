@@ -199,6 +199,12 @@ public class FireService {
         facilities.forEach(f -> log.info("  → caserne #{} '{}' lon={} lat={}", f.getId(), f.getName(), f.getLon(), f.getLat()));
     }
 
+    /** Vrai si ce feu menace une de nos casernes. */
+    public boolean isCaserneFire(FireDto fire) {
+        ensureFacilityList();
+        return caserneOnFire(fire) != null;
+    }
+    
     /** Retourne la caserne menacée par ce feu, ou null si aucune n'est concernée. */
     private FacilityDto caserneOnFire(FireDto fire) {
         List<FacilityDto> facilities = knownFacilities.get();
@@ -234,6 +240,7 @@ public class FireService {
         // Tier 0b : tous en mission → rappeler le compatible + le plus proche de CETTE caserne
         vehicles.stream()
                 .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+                .filter(v -> v.getType() != null && v.getType().getLiquidCapacity() > 0) // exclure ambulances pour le moment
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .min(Comparator.comparingDouble(v -> calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon())))
                 .ifPresent(v -> {

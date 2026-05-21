@@ -32,6 +32,11 @@ public class EventPollerThread {
     private volatile List<VehicleDto>        cachedVehicles = List.of();
     private volatile List<EmergencyEventDto> cachedEvents   = List.of();
 
+    private volatile int lastFireCount = -1; // pour ne pas afficher les logs si ca bouge pas
+    private volatile int lastEventCount = -1;
+
+
+
     public EventPollerThread(FireClient fireClient,
                              VehicleClient vehicleClient,
                              RpEventClient rpEventClient,
@@ -47,29 +52,38 @@ public class EventPollerThread {
         try {
             List<FireDto>           fires    = fireClient.getAllFires();
             List<EmergencyEventDto> events   = rpEventClient.getAllEvents();
-            List<VehicleDto>        vehicles = vehicleClient.getVehiclesByTeam(teamUuid);
+            List<VehicleDto>        vehicles = vehicleClient.getVehiclesByTeam(teamUuid); //ne prend que les dispos
 
             if (fires    != null) this.cachedFires    = fires;
             if (events   != null) this.cachedEvents   = events;
             if (vehicles != null) this.cachedVehicles = vehicles;
 
-            if (vehicles == null || vehicles.isEmpty()) {
-                log.info("Aucun véhicule disponible.");
-                return;
-            }
-
             if (fires != null && !fires.isEmpty()) {
-                log.info("Feux actifs : {}", fires.size());
+                int fireCount = fires.size();
+                if (fireCount != lastFireCount) {
+                    log.info("Feux actifs : {}", fireCount);
+                    lastFireCount = fireCount;
+                }
                 emergencyManagerService.dispatchAll(fires, vehicles);
             } else {
-                log.info("Aucun feu actif.");
+                if (lastFireCount != 0) {
+                    log.info("Aucun feu actif.");
+                    lastFireCount = 0;
+                }
             }
 
             if (events != null && !events.isEmpty()) {
-                log.info("Events actifs : {}", events.size());
+                int eventCount = events.size();
+                if (eventCount != lastEventCount) {
+                    log.info("Events actifs : {}", eventCount);
+                    lastEventCount = eventCount;
+                }
                 emergencyManagerService.dispatchAllEvents(events, vehicles);
             } else {
-                log.info("Aucun event actif.");
+                if (lastEventCount != 0) {
+                    log.info("Aucun event actif.");
+                    lastEventCount = 0;
+                }
             }
 
         } catch (Exception e) {

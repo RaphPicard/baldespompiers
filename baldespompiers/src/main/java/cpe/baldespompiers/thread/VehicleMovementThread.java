@@ -650,7 +650,7 @@ public class VehicleMovementThread {
     private void waitForFireOut(Integer fireId, Integer vehicleId) throws InterruptedException {
         FireDto initial = fireClient.getFireById(fireId);
         int threshold = (initial != null && fireService.isCaserneFire(initial)) ? 0 : abandonIntensity; // seuil d'abandon à 0 si le feu est sur notre caserne !!!
-        int lastIntensity = -1;
+        float lastIntensity = -1;
 
         while (true) {
 
@@ -675,7 +675,7 @@ public class VehicleMovementThread {
                 // Plus assez de liquide pour continuer → abandonne la mission et rentre à la caserne
                 throw new InsufficientResourcesException("liquide insuffisant (liquid=" + vehicle.getLiquidQuantity() + ")");
 
-            int intensity = current.getIntensity();
+            float intensity = current.getIntensity();
             if (intensity != lastIntensity) {
                 log.info("[Feu #{}] intensité = {}", fireId, intensity);
                 lastIntensity = intensity;
@@ -686,7 +686,7 @@ public class VehicleMovementThread {
 
     // ── Attente résolution event ──────────────────────────────────────────────
     private void waitForEventOut(Integer eventId, Integer vehicleId) throws InterruptedException {
-        int lastIntensity = -1;
+        float lastIntensity = -1.0f;
         while (true) {
             if (emergencyManagerService.isRecallRequested(vehicleId))
                 throw new InsufficientResourcesException("rappel actif");
@@ -696,7 +696,7 @@ public class VehicleMovementThread {
 
             // Cas 1 : event avec intensité → attendre qu'elle descende à 0
             if (current.getIntensity() > 0) {
-                int intensity = current.getIntensity();
+                float intensity = current.getIntensity();
                 if (intensity != lastIntensity) {
                     log.info("[Event #{}] intensité = {}", eventId, intensity);
                     lastIntensity = intensity;

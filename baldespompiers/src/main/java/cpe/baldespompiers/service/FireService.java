@@ -264,7 +264,7 @@ public class FireService {
         // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
         // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)
         List<FireDto> sortedFires = fires.stream()
-                .filter(f -> f.getIntensity() > abandonIntensity) // laisse les feux quasi-éteints aux autres équipes
+                .filter(f -> f.getIntensity() > abandonIntensity + 2) // laisse les feux quasi-éteints aux autres équipes avec une petite marge de +2 pour ne pas y retourner en boucle
                 .sorted(Comparator
                 // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
                 .comparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
@@ -326,7 +326,7 @@ public class FireService {
      */
     public Optional<FireDto> findNextFireForVehicle(VehicleDto vehicle, List<FireDto> activeFires) {
         return activeFires.stream()
-                .filter(f -> f.getIntensity() > abandonIntensity)                    // ignore les feux éteints ou quasi-éteints (laissés aux autres équipes)
+                .filter(f -> f.getIntensity() > abandonIntensity + 2)                    // ignore les feux éteints ou quasi-éteints (laissés aux autres équipes), avec une petite marge
                 .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris
                 .filter(f -> isLiquidCompatible(vehicle.getLiquidType(), f.getType())) // liquide efficace requis
                 .max(Comparator.comparingDouble(f -> vehicleScore(vehicle, f)));      // prend le feu pour lequel ce véhicule est le plus efficace

@@ -292,3 +292,6 @@ cpefighter/
 - Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l'intensité du feu (pour éviter les retours à la caserne inutiles)
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel.  pour savoir s'il doit faire le plein avant de partir ou pas
 - Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
+
+- Attention : notre strategie (laisser les feux à 4 d'intensité) va aussi laisser les feux qui sont sur nos casernes à 4 et ne jamais l'eteindre -> à corriger
+- Rappel forcé si feu caserne -> a rappeler une ambulance au lieu d'un camion de mompier avec le bon anti-feu

@@ -154,7 +154,7 @@ public class VehicleMovementThread {
                 } catch (FireGoneException e) {
                     log.info("Véhicule {} : feu #{} éteint en route — recherche d'un autre feu", vehicle.getId(), currentFire.getId());
                     FireDto redirect = redirectAfterFireGone(vehicle, currentFire);
-                    if (redirect == null) break; // aucun feu disponible → libère le véhicule
+                    if (redirect == null) { needsRecharge = true; break; } // aucun feu disponible → retour caserne avant libération
                     currentFire = redirect;
                     continue;
                 }
@@ -256,7 +256,7 @@ public class VehicleMovementThread {
                     log.info("Véhicule {} : event #{} résolu en route — recherche d'un autre event",
                             vehicle.getId(), currentEvent.getId());
                     EmergencyEventDto redirect = redirectAfterEventGone(vehicle, currentEvent);
-                    if (redirect == null) break; // aucun event disponible → libère le véhicule
+                    if (redirect == null) { needsRecharge = true; break; } // aucun event disponible → retour caserne avant libération
                     currentEvent = redirect;
                     continue;
                 }
@@ -656,7 +656,11 @@ public class VehicleMovementThread {
 
 
             FireDto current = fireClient.getFireById(fireId);
-            if (current == null || current.getIntensity() <= abandonIntensity) break; // feu éteint ou quasi-éteint (≤ seuil) → on laisse aux autres équipes
+            if (current == null || current.getIntensity() <= abandonIntensity) { // feu éteint ou quasi-éteint (≤ seuil) → on laisse aux autres équipes
+                log.info("Feu #{} éteint ou quasi-éteint (intensité={}), laissé pour les autres équipes : abandonné par véhicule {}",
+                        fireId, current != null ? current.getIntensity() : "N/A", vehicleId);
+                break;
+            }
 
             // Vérifie le niveau de liquide uniquement pour les véhicules avec réservoir (pas les ambulances)
             VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));

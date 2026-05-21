@@ -58,9 +58,9 @@ public class AppConfig implements WebMvcConfigurer {
     @Bean(name = "vehicleMovementExecutor")
     public Executor vehicleMovementExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);             // threads de base, toujours disponibles
-        executor.setMaxPoolSize(20);             // maximum de véhicules se déplaçant en parallèle
-        executor.setQueueCapacity(50);           // file d'attente si tous les threads sont pris
+        executor.setCorePoolSize(20);    // threads toujours actifs → pas de queue pour les 20 premiers
+        executor.setMaxPoolSize(50);     // max si vraiment beaucoup de véhicules
+        executor.setQueueCapacity(10);   // queue courte → force la création de threads plutôt que d'attendre
         executor.setThreadNamePrefix("vehicle-move-"); // nom des threads dans les logs (ex : vehicle-move-1)
         executor.initialize();                   // démarre le pool (obligatoire avant utilisation)
         return executor;

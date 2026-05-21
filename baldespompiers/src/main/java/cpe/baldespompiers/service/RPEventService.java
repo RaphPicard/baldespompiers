@@ -69,7 +69,8 @@ public class RPEventService {
         if (events == null || events.isEmpty()) return;
 
         List<EmergencyEventDto> filtered = events.stream()
-                .filter(e -> e.getIntensity() > abandonThreshold)
+                .filter(e -> e.getIntensity() > abandonThreshold
+                        || (e.getInjuredPeopleDtoList() != null && !e.getInjuredPeopleDtoList().isEmpty()))
                 .filter(e -> !emergencyManagerService.getAssignedEvents()
                         .contains(e.getId()))
                 .sorted(Comparator.comparingDouble(EmergencyEventDto::getIntensity)

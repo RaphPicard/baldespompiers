@@ -11,7 +11,6 @@ import cpe.baldespompiers.model.dto.Coord;
 import cpe.baldespompiers.model.dto.EmergencyEventDto;
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
-import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.service.FireService;
@@ -546,8 +545,17 @@ public class VehicleMovementThread {
                             throw new FireGoneException("feu #" + targetId + " éteint en route par une autre équipe");
                     } else if (phase == MovePhase.TO_EVENT) {
                         EmergencyEventDto ev = rpEventClient.getEventById(targetId);
-                        if (ev == null || ev.getIntensity() <= 0)
-                            throw new FireGoneException("event #" + targetId + " résolu en route par une autre équipe");
+                        if (ev == null) {
+                            throw new FireGoneException("event #" + targetId + " disparu");
+                        }
+                        if (ev.getIntensity() <= 0) {
+                            boolean allTreated = ev.getInjuredPeopleDtoList() == null
+                                    || ev.getInjuredPeopleDtoList().isEmpty()
+                                    || ev.getInjuredPeopleDtoList().stream()
+                                    .allMatch(p -> p.getInjuryDto() == null
+                                            || p.getInjuryDto().getIntensity() <= 0);
+                            if (allTreated) throw new FireGoneException("event #" + targetId + " résolu en route");
+                        }
                     }
                 }
             }
@@ -655,16 +663,34 @@ public class VehicleMovementThread {
     }
 
     // ── Attente résolution event ──────────────────────────────────────────────
-    private void waitForEventOut(Integer eventId, Integer vehicleId)
-            throws InterruptedException {
+    private void waitForEventOut(Integer eventId, Integer vehicleId) throws InterruptedException {
         while (true) {
             if (emergencyManagerService.isRecallRequested(vehicleId))
                 throw new InsufficientResourcesException("rappel actif");
 
             EmergencyEventDto current = rpEventClient.getEventById(eventId);
-            if (current == null || current.getIntensity() <= 0) break;
+            if (current == null) break;
 
-            log.info("[Event #{}] intensité = {}", eventId, current.getIntensity());
+            // Cas 1 : event avec intensité → attendre qu'elle descende à 0
+            if (current.getIntensity() > 0) {
+                log.info("[Event #{}] intensité = {}", eventId, current.getIntensity());
+                Thread.sleep(fireCheckDelayMs);
+                continue;
+            }
+
+            // Cas 2 : intensité = 0 → vérifier si des blessés sont encore en cours de traitement
+            if (current.getInjuredPeopleDtoList() == null || current.getInjuredPeopleDtoList().isEmpty()) {
+                break; // pas de blessés → terminé
+            }
+
+            boolean allTreated = current.getInjuredPeopleDtoList().stream()
+                    .allMatch(p -> p.getInjuryDto() == null
+                            || p.getInjuryDto().getIntensity() <= 0);
+
+            if (allTreated) break;
+
+            log.info("[Event #{}] {} blessés en cours de traitement",
+                    eventId, current.getInjuredPeopleDtoList().size());
             Thread.sleep(fireCheckDelayMs);
         }
     }

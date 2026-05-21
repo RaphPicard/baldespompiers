@@ -1,9 +1,13 @@
 package cpe.baldespompiers.service;
 
+import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.model.dto.EmergencyEventDto;
+import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.EmergencyType;
+import cpe.baldespompiers.tools.GisTools;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +24,12 @@ public class RPEventService {
     private static final Logger log = LoggerFactory.getLogger(RPEventService.class);
 
     private final EmergencyManagerService emergencyManagerService;
+    private final FacilityClient facilityClient;
+
+    private final AtomicReference<List<FacilityDto>> knownFacilities = new AtomicReference<>(null);
+
+    @Value("${simulator.team-uuid}")
+    private String teamUuid;
 
     @Value("${dispatch.min.fuel:10.0}")
     private float minFuel;
@@ -30,8 +40,22 @@ public class RPEventService {
     @Value("${dispatch.abandon.threshold:4.0}")
     private float abandonThreshold;
 
-    public RPEventService(@Lazy EmergencyManagerService emergencyManagerService) {
+    public RPEventService(@Lazy EmergencyManagerService emergencyManagerService,
+                          FacilityClient facilityClient) {
         this.emergencyManagerService = emergencyManagerService;
+        this.facilityClient = facilityClient;
+    }
+
+    private void ensureFacilityList() {
+        if (knownFacilities.get() != null) return;
+        List<FacilityDto> facilities = facilityClient.getAllFacilities(teamUuid);
+        if (facilities != null && !facilities.isEmpty()) knownFacilities.set(facilities);
+    }
+
+    private Optional<FacilityDto> facilityOf(VehicleDto v) {
+        List<FacilityDto> facilities = knownFacilities.get();
+        if (facilities == null || v.getFacilityRefID() == null) return Optional.empty();
+        return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst();
     }
 
     // ── Vérifie si le véhicule est efficace sur ce type d'event ──────────────
@@ -61,12 +85,16 @@ public class RPEventService {
                         .containsKey(v.getId()))
                 .filter(v -> isCompatibleWithEvent(v, event))
                 .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuelQuantity() >= minFuel);
+                .filter(v -> v.getFuelQuantity() >= minFuel)
+                .filter(v -> facilityOf(v)
+                        .map(f -> GisTools.hasFuelToReach(v, event.getLon(), event.getLat(), f.getLon(), f.getLat()))
+                        .orElseGet(() -> GisTools.hasFuelToReach(v, event.getLon(), event.getLat())));
     }
 
     // ── Dispatch principal ────────────────────────────────────────────────────
     public void dispatchEvents(List<EmergencyEventDto> events, List<VehicleDto> vehicles) {
         if (events == null || events.isEmpty()) return;
+        ensureFacilityList();
 
         List<EmergencyEventDto> filtered = events.stream()
                 .filter(e -> e.getIntensity() > abandonThreshold

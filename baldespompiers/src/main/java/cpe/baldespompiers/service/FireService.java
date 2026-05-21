@@ -5,6 +5,7 @@ import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.LiquidType;
+import cpe.baldespompiers.tools.GisTools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -153,14 +154,23 @@ public class FireService {
 
     // ── Filtres de candidats ───────────────────────────────────────────────────
 
-    /** Véhicules libres, au-dessus des seuils minimaux et compatibles avec le type de feu. */
+    private Optional<FacilityDto> facilityOf(VehicleDto v) {
+        List<FacilityDto> facilities = knownFacilities.get();
+        if (facilities == null || v.getFacilityRefID() == null) return Optional.empty();
+        return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst();
+    }
+
+    /** Véhicules libres, au-dessus des seuils minimaux, compatibles avec le type de feu et avec assez de carburant pour aller au feu ET rentrer à la caserne. */
     private Stream<VehicleDto> candidates(List<VehicleDto> vehicles, FireDto fire) {
         return vehicles.stream()
-                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
                 .filter(v -> v.getFuelQuantity() >= minFuel)
-                .filter(v -> v.getLiquidQuantity() >= minLiquid);
+                .filter(v -> v.getLiquidQuantity() >= minLiquid)
+                .filter(v -> facilityOf(v)
+                        .map(f -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat(), f.getLon(), f.getLat()))
+                        .orElseGet(() -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat())));
     }
 
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */

@@ -15,6 +15,7 @@ import org.opengis.referencing.operation.MathTransform;
 import org.opengis.referencing.operation.TransformException;
 
 import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.VehicleDto;
 
 public class GisTools {
     public static final int SIR_4326=4326;
@@ -71,6 +72,39 @@ public class GisTools {
 //			return -1;
 //	}
 
+
+    /**
+     * Retourne true si le véhicule a assez de carburant pour atteindre la mission
+     * ET rentrer à sa caserne.
+     * Formule : (dist_aller + dist_retour) * fuelConsumption(L/100km) / 100 ≤ fuel restant
+     */
+    public static boolean hasFuelToReach(VehicleDto vehicle, double targetLon, double targetLat,
+                                         double facilityLon, double facilityLat) {
+        if (vehicle.getType() == null) return true;
+        float consumptionPer100km = vehicle.getType().getFuelConsumption();
+        if (consumptionPer100km <= 0) return true;
+
+        double distAllerKm   = computeDistance2(new Coord(vehicle.getLon(), vehicle.getLat()),
+                                                new Coord(targetLon, targetLat)) / 1000.0;
+        double distRetourKm  = computeDistance2(new Coord(targetLon, targetLat),
+                                                new Coord(facilityLon, facilityLat)) / 1000.0;
+        double fuelNeeded = (distAllerKm + distRetourKm) * consumptionPer100km / 100.0;
+        return vehicle.getFuelQuantity() >= fuelNeeded;
+    }
+
+    /**
+     * Surcharge aller simple (sans caserne connue) — utilisée en fallback.
+     */
+    public static boolean hasFuelToReach(VehicleDto vehicle, double targetLon, double targetLat) {
+        if (vehicle.getType() == null) return true;
+        float consumptionPer100km = vehicle.getType().getFuelConsumption();
+        if (consumptionPer100km <= 0) return true;
+
+        double distanceKm = computeDistance2(new Coord(vehicle.getLon(), vehicle.getLat()),
+                                             new Coord(targetLon, targetLat)) / 1000.0;
+        double fuelNeeded = distanceKm * consumptionPer100km / 100.0;
+        return vehicle.getFuelQuantity() >= fuelNeeded;
+    }
 
     public static int computeDistance2(Coord c1, Coord c2) {
         c1.setProjection(""+SIR_4326);

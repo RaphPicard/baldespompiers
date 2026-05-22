@@ -31,8 +31,8 @@ public class EmergencyManagerService {
     private final Set<Integer> assignedFires                 = ConcurrentHashMap.newKeySet();
     private final Set<Integer> assignedEvents                = ConcurrentHashMap.newKeySet();
 
-    private final AtomicBoolean recallMode       = new AtomicBoolean(false);
-    private final Set<Integer> recallRequestedIds = ConcurrentHashMap.newKeySet();
+    private final AtomicBoolean recallMode       = new AtomicBoolean(false); // si true alors tous les véhicules en mission doivent être rappelés à la caserne (rappel global), sinon seuls les véhicules dont l'ID est dans recallRequestedIds doivent être rappelés (rappel unitaire)
+    private final Set<Integer> recallRequestedIds = ConcurrentHashMap.newKeySet(); // sera vérifier dans moveVehicle pour savoir si un véhicule doit être rappelé à la caserne (rappel unitaire)
 
     @Value("${simulator.team-uuid}")
     private String teamUuid;
@@ -65,14 +65,17 @@ public class EmergencyManagerService {
         if (recallMode.get()) { log.debug("dispatchAll skip (mode rappel)"); return; } // guard pour le bouton de rappel global
         fireService.dispatchFires(fires, vehicles); // ca va FILTRER et TRIER les feux PUIS appeler dispatch d'en dessous
     }
+    // |
+    // |
+    // v
 
     public void dispatch(VehicleDto vehicle, FireDto fire) { // appelée dans FireService
         log.info("Dispatch véhicule {} → feu #{} (intensité={})",
                 vehicle.getId(), fire.getId(), fire.getIntensity());
-        vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
-        assignedFires.add(fire.getId());
+        vehicleStates.put(vehicle.getId(), VehicleState.MOVING); // pour indiquer que ce véhicule est en mission (en train de se déplacer vers un feu)
+        assignedFires.add(fire.getId()); // pour ne pas que le même feu soit réassigné à un autre véhicule tant que le premier n'est pas arrivé (éviter les doublons)
         vehicleMovementThread.moveVehicle(
-                vehicle, fire, teamUuid,    // si jamais le teamUuid ne sert à rien ici on peut l'enlever, et de move vehicle aussi et ...
+                vehicle, fire, teamUuid,    // si jamais le teamUuid ne sert à rien ici on peut l'enlever, et de move vehicle aussi et ... ???
                 () -> onArrived(vehicle.getId(), fire.getId())
         );
     }
@@ -99,7 +102,7 @@ public class EmergencyManagerService {
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
         assignedEvents.add(event.getId());
         vehicleMovementThread.moveVehicleToEvent(
-                vehicle, event, teamUuid, // pareil, le teamUuid ne sert à rien ici on peut l'enlever, et de moveVehicleToEvent aussi et ...
+                vehicle, event, teamUuid, // pareil, le teamUuid ne sert à rien ici on peut l'enlever, et de moveVehicleToEvent aussi et ... ???
                 () -> onEventArrived(vehicle.getId(), event.getId())
         );
     }

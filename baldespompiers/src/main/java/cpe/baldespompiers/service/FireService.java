@@ -231,33 +231,38 @@ public class FireService {
      * Essaie d'abord un véhicule libre ; si tous sont en mission, rappelle le meilleur
      * (liquide compatible + le plus proche de la caserne menacée).
      */
+    // appelé dans dispatchFires après verif caserneOnFire
     private void handleCasernefire(FireDto fire, FacilityDto caserne, List<VehicleDto> vehicles) {
         // Tier 0a : véhicule libre compatible → dispatch immédiat
         Optional<VehicleDto> free = candidates(vehicles, fire) // ne prend que les dispos
                 .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
         if (free.isPresent()) {
-            log.error("=== FEU CASERNE '{}' #{} — dispatch immédiat véhicule {} ===", caserne.getName(), fire.getId(), free.get().getId());
+            log.error("=== FEU CASERNE '{}' #{} — dispatch immédiat du véhicule libre {} ===", caserne.getName(), fire.getId(), free.get().getId());
             emergencyManagerService.dispatch(free.get(), fire);
-            return;
+            return; // on examine pas les autres tiers si on a trouvé un véhicule libre, même si il y en a plusieurs (pas besoin de rappeler un autre véhicule si on en a déjà un qui part)
         }
 
-        // Cooldown : ne pas rappeler plusieurs fois pour le même feu
+        // Cooldown : ne pas rappeler plusieurs fois pour le même feu.
+        // Attention car si une ambulance doit y aller AUSSI, ca peut poser problème ???
         Long last = recallIssuedAt.get(fire.getId());
         if (last != null && System.currentTimeMillis() - last < recallCooldownMs) {
             log.debug("Feu #{} caserne {} — rappel déjà en cours, attente de 30s", fire.getId(), caserne.getId());
             return;
         }
 
-        // Tier 0b : tous en mission → rappeler le compatible + le plus proche de CETTE caserne
+        // Tier 0b : tous en mission → rappeler le plus compatible (efficacité max), puis le plus proche de CETTE caserne à égalité
         vehicles.stream()
-                .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+                .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId())) // on prend tout ceux en mission
                 .filter(v -> v.getType() != null && v.getType().getLiquidCapacity() > 0) // exclure ambulances pour le moment
-                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
-                .min(Comparator.comparingDouble(v -> calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon())))
+                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())) // on ne garde que les compatibles
+                .max(Comparator.comparingDouble((VehicleDto v) -> // on garde le plus compatible au liquide anti-feu ET on inclue la distance aussi
+                        v.getLiquidType().getEfficiency(fire.getType()) * efficiencyWeight
+                        - calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon()) * distanceWeight))
                 .ifPresent(v -> {
-                    log.error("=== FEU CASERNE '{}' #{} — rappel forcé véhicule {} ===", caserne.getName(), fire.getId(), v.getId());
-                    emergencyManagerService.requestRecall(v.getId());
-                    recallIssuedAt.put(fire.getId(), System.currentTimeMillis());
+                    log.error("=== FEU CASERNE '{}' #{} — rappel forcé du véhicule {} ===", caserne.getName(), fire.getId(), v.getId());
+                    // a la place de requestRecall, il faudrait pas plutot faire dispatch(v, fire) ???
+                    emergencyManagerService.requestRecall(v.getId()); // ajoute ce véhicule à la liste des véhicules à rappeler (rappel unitaire) ; le mouvement de rappel sera géré dans moveVehicle, qui vérifiera régulièrement si un rappel est demandé pour ce véhicule et le redirigera vers la caserne au lieu du feu
+                    recallIssuedAt.put(fire.getId(), System.currentTimeMillis()); // enregistre le timestamp de ce rappel pour éviter les rappels répétés tant que ce feu n'est pas traité
                 });
     }
 
@@ -270,11 +275,11 @@ public class FireService {
     // ── Dispatch feux ──────────────────────────────────────────────────────────
 
     public void dispatchFires(List<FireDto> fires, List<VehicleDto> vehicles) {
-        ensureFacilityList();
+        ensureFacilityList(); // charge les casernes si pas déjà fait, pour pouvoir identifier les feux sur caserne et leur donner la priorité absolue dans le dispatch
 
         // Priorité absolue : feux sur une caserne traités avant tout le reste
         fires.stream()
-                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId()))
+                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris en charge par un véhicule
                 .forEach(f -> {
                     FacilityDto caserne = caserneOnFire(f);
                     if (caserne != null) handleCasernefire(f, caserne, vehicles);
@@ -343,9 +348,10 @@ public class FireService {
      * Cherche le meilleur feu non-assigné compatible avec ce véhicule pour un départ direct
      * (sans repassage par la caserne). Réutilise isLiquidCompatible et vehicleScore.
      */
+    // appelé par vehicleMovementThread pendant le déplacement d'un véhicule déjà en mission, pour lui trouver un nouveau feu à traiter directement depuis son feu actuel, sans repasser par la caserne (gain de temps, surtout si le véhicule est déjà proche d'un autre feu compatible)
     public Optional<FireDto> findNextFireForVehicle(VehicleDto vehicle, List<FireDto> activeFires) {
         return activeFires.stream()
-                .filter(f -> f.getIntensity() > abandonIntensity + 2)                    // ignore les feux éteints ou quasi-éteints (laissés aux autres équipes), avec une petite marge
+                .filter(f -> f.getIntensity() > abandonIntensity + 2)                    // ignore les feux éteints ou quasi-éteints (laissés aux autres équipes), avec une petite marge pour ne pas boucler sur le feux qu'on vient de laisser
                 .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris
                 .filter(f -> isLiquidCompatible(vehicle.getLiquidType(), f.getType())) // liquide efficace requis
                 .max(Comparator.comparingDouble(f -> vehicleScore(vehicle, f)));      // prend le feu pour lequel ce véhicule est le plus efficace
@@ -355,6 +361,7 @@ public class FireService {
      * Transition directe d'un feu à un autre (sans caserne) :
      * libère l'ancien feu dans assignedFires, prend le nouveau, repasse en MOVING.
      */
+    // appelé par vehicleMovementThread lorsqu'un véhicule arrive sur un feu, pour lui faire faire une transition directe vers un autre feu compatible trouvé par findNextFireForVehicle, sans repasser par la caserne (gain de temps, surtout si le nouveau feu est proche du feu actuel)
     public void claimFire(Integer vehicleId, Integer oldFireId, Integer newFireId) {
         emergencyManagerService.getAssignedFires().remove(oldFireId); // libère l'ancien feu immédiatement (un autre véhicule pourra le récupérer)
         emergencyManagerService.getAssignedFires().add(newFireId);    // réserve le nouveau avant même de partir (évite un double dispatch)

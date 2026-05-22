@@ -2,6 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8"/>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="../css/map.css"/>
@@ -12,10 +13,54 @@
   <script src="../js/api.js" defer></script>
   <script src="../js/header.js" defer></script>
   <script src="../js/map.js" defer></script>
-  <title>Map</title>
+  <title>Map · CPE Fighter</title>
 </head>
 <body>
 <div id="header"></div>
-<div id="map"></div>
+<div style="position: relative;">
+  <div id="map"></div>
+
+  <!-- Stats + Filters overlay (même colonne, top-left) -->
+  <div class="map-overlay stats-panel">
+    <div class="stats-row">
+      <span class="stats-label"><span class="stats-icon">🔥</span> Feux actifs</span>
+      <span class="stats-value" id="stat-fires">0</span>
+    </div>
+    <div class="stats-row">
+      <span class="stats-label"><span class="stats-icon">🩹</span> Accidents / blessés</span>
+      <span class="stats-value" id="stat-events">0</span>
+    </div>
+    <div class="stats-row">
+      <span class="stats-label"><span class="stats-icon">🚒</span> Véhicules</span>
+      <span class="stats-value" id="stat-vehicles">0</span>
+    </div>
+    <div class="stats-row">
+      <span class="stats-label"><span class="stats-icon">🎯</span> En mission</span>
+      <span class="stats-value" id="stat-mission">0</span>
+    </div>
+    <div class="stats-row">
+      <span class="stats-label"><span class="stats-icon">🏠</span> Casernes</span>
+      <span class="stats-value" id="stat-facilities">0</span>
+    </div>
+
+    <div class="panel-separator"></div>
+
+    <div class="filter-btn" id="filter-fires" onclick="toggleLayer('fires')">
+      🔥 Feux <span class="count" id="filter-fires-count">0</span>
+    </div>
+    <div class="filter-btn" id="filter-events" onclick="toggleLayer('events')">
+      🩹 Accidents <span class="count" id="filter-events-count">0</span>
+    </div>
+    <div class="filter-btn" id="filter-vehicles" onclick="toggleLayer('vehicles')">
+      🚒 Véhicules <span class="count" id="filter-vehicles-count">0</span>
+    </div>
+    <div class="filter-btn" id="filter-trails" onclick="toggleLayer('trails')">
+      ✨ Trajets <span class="count" id="filter-trails-count">on</span>
+    </div>
+    <div class="filter-btn" id="filter-facilities" onclick="toggleLayer('facilities')">
+      🏠 Casernes <span class="count" id="filter-facilities-count">0</span>
+    </div>
+  </div>
+</div>
 </body>
 </html>

@@ -5,6 +5,7 @@ import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.model.type.LiquidType;
+import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.tools.GisTools;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -170,6 +171,11 @@ public class FireService {
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
                 .filter(v -> v.getFuelQuantity() >= minFuel)
+                .filter(v -> {                                          // ← filtre CAR
+                    if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
+                    return v.getLiquidQuantity() >= minLiquid;
+                })
+                // ↓ SUPPRIMER cette ligne — elle écrase le filtre CAR
                 .filter(v -> v.getLiquidQuantity() >= minLiquid)
                 .filter(v -> facilityOf(v)
                         .map(f -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat(), f.getLon(), f.getLat()))
@@ -179,11 +185,15 @@ public class FireService {
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */
     private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles, FireDto fire) {
         return candidates(vehicles, fire)
-                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
-                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) //vérifier disponibilité (pas déjà en mission)
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+                .filter(v -> {
+                    if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
+                    return v.getLiquidQuantity() >= readyLiquid;
+                })
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getFuelQuantity() >= readyFuel)
-                .filter(v -> v.getLiquidQuantity() >= readyLiquid)
+                .filter(v -> v.getLiquidQuantity() >= readyLiquid) // ← SUPPRIMER cette ligne
                 .filter(v -> v.getCrewMember() >= readyCrew);
     }
 

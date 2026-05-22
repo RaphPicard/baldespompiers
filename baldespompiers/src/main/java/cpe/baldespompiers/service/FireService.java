@@ -123,7 +123,7 @@ public class FireService {
 
     /**
      * Score d'aptitude d'un véhicule pour un feu donné.
-     * Pondération : compatibilité liquide (x50) > équipage (x10) > -distance (x5) > liquide + carburant.
+     * Pondération : efficacité du liquide (priorité absolue) > taille de l'équipage > ressources restantes > distance au feu.
      * Un véhicule parfaitement compatible (efficiency=1.0) gagne +50, ce qui prime sur
      * les petites différences de ressources, mais pas sur la taille de l'équipage.
      */
@@ -132,12 +132,15 @@ public class FireService {
         double efficiency = (v.getLiquidType() != null)
                 ? v.getLiquidType().getEfficiency(fire.getType())
                 : 0.0;
+
+        // pas sûr qu'il faille resonner en terme de RATIO ???
+
         // Récupère le ratio du liquide embarqué par rapport à la capacité du véhicule
-        double liquidRatio = (v.getLiquidType() != null && v.getType().getLiquidCapacity() > 0) // pour prendre en compte la quantité de liquide embarquée par rapport à la capacité du véhicule
+        double liquidRatio = (v.getLiquidType() != null && v.getType().getLiquidCapacity() > 0)
                 ? v.getLiquidQuantity()  / v.getType().getLiquidCapacity()
                 : 0.0;
         // Récupère le ratio du carburant embarqué par rapport à la capacité du véhicule
-        double fuelRatio = (v.getType() != null && v.getType().getFuelCapacity() > 0) // pour prendre en compte la quantité d'essence embarquée par rapport à la capacité du véhicule
+        double fuelRatio = (v.getType() != null && v.getType().getFuelCapacity() > 0)
                 ? v.getFuelQuantity()  / v.getType().getFuelCapacity()
                 : 0.0;
         // Récupère la distance du véhicule au feu
@@ -158,32 +161,32 @@ public class FireService {
 
     // ── Filtres de candidats ───────────────────────────────────────────────────
 
-    private Optional<FacilityDto> facilityOf(VehicleDto v) {
+    private Optional<FacilityDto> facilityOf(VehicleDto v) { // pour les véhicules qui ont une référence de caserne, récupère les coordonnées de cette caserne (pour calculer la distance totale aller-retour dans le filtre candidates)
         List<FacilityDto> facilities = knownFacilities.get();
         if (facilities == null || v.getFacilityRefID() == null) return Optional.empty();
-        return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst();
+        return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst(); //on recup l'id de la caserne DU véhicule en paramètre
     }
 
     /** Véhicules libres, au-dessus des seuils minimaux, compatibles avec le type de feu et avec assez de carburant pour aller au feu ET rentrer à la caserne. */
     private Stream<VehicleDto> candidates(List<VehicleDto> vehicles, FireDto fire) {
         return vehicles.stream()
-                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
-                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) // véhicule libre (pas déjà en mission)
+                .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())) // au moins 10% d'efficacité du liquide contre ce type de feu
                 .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuelQuantity() >= minFuel)
                 .filter(v -> {                                          // ← filtre CAR
-                    if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
-                    return v.getLiquidQuantity() >= minLiquid;
+                    if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f; // les voitures ont une petite capacité de liquide, on accepte un seuil plus bas pour ne pas les exclure systématiquement (elles sont souvent compatibles mais avec peu de liquide, ce qui est mieux que rien pour les feux faibles ou les feux avec blessés)
+                    return v.getLiquidQuantity() >= minLiquid; // si pas CAR, on applique le seuil normal
                 })
-                .filter(v -> facilityOf(v)
+                .filter(v -> v.getFuelQuantity() >= minFuel)
+                .filter(v -> facilityOf(v) // si on connaît la caserne de ce véhicule, vérifie qu'il a assez de carburant pour aller au feu ET revenir à la caserne ; sinon, vérifie juste qu'il a assez de carburant pour aller au feu (par sécurité, on ne veut pas exclure un véhicule juste parce qu'on n'a pas les infos de sa caserne, surtout s'il est proche du feu)
                         .map(f -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat(), f.getLon(), f.getLat()))
                         .orElseGet(() -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat())));
     }
 
     /** Véhicules "prêts" : candidats valides avec ressources au-dessus des seuils préférés. */
     private Stream<VehicleDto> best_candidates(List<VehicleDto> vehicles, FireDto fire) {
-        return candidates(vehicles, fire)
-                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+        return candidates(vehicles, fire) // on se base sur les candidats déjà filtrés pour ne pas répéter les mêmes filtres (compatibilité, crew, fuel min, liquid min), puis on applique les seuils "ready" pour ne garder que les véhicules confortables à envoyer en priorité
+                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId())) // on rechek ca au cas où le véhicule serait passé en mission entre temps (mieux vaut exclure un véhicule qui vient d'être pris que de risquer de le dispatcher alors qu'il est déjà en mission)
                 .filter(v -> {
                     if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
                     return v.getLiquidQuantity() >= readyLiquid;
@@ -196,7 +199,7 @@ public class FireService {
 
     // ── Protection caserne ─────────────────────────────────────────────────────
 
-    /** Charge toutes nos casernes une seule fois via notre teamUuid. */
+    /** Charge toutes nos casernes dans une variable une seule fois via notre teamUuid. */
     private void ensureFacilityList() {
         if (knownFacilities.get() != null) return; //coords de nos casernes déjà chargées
         List<FacilityDto> facilities = facilityClient.getAllFacilities(teamUuid);
@@ -207,6 +210,7 @@ public class FireService {
     }
 
     /** Vrai si ce feu menace une de nos casernes. */
+    // C'est la méthode qui sera appelée pour chaque feu dans dispatchFires, avant même de faire le tri des feux, pour garantir une priorité absolue aux feux sur caserne (traités avant tout autre feu, même les feux avec blessés).
     public boolean isCaserneFire(FireDto fire) {
         ensureFacilityList();
         return caserneOnFire(fire) != null;
@@ -217,7 +221,7 @@ public class FireService {
         List<FacilityDto> facilities = knownFacilities.get();
         if (facilities == null) return null;
         return facilities.stream()
-                .filter(f -> calcule_distance(fire.getLat(), fire.getLon(), f.getLat(), f.getLon()) < caserneFireRadius)
+                .filter(f -> calcule_distance(fire.getLat(), fire.getLon(), f.getLat(), f.getLon()) < caserneFireRadius) // si le feu est à moins de caserneFireRadius degrés de la caserne, on considère que la caserne est menacée (environ 200 m, à ajuster selon les tests)
                 .findFirst()
                 .orElse(null);
     }

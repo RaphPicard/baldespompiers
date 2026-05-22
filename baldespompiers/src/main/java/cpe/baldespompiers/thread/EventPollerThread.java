@@ -30,11 +30,12 @@ public class EventPollerThread {
     @Value("${simulator.team-uuid}")
     private String teamUuid;
 
-    private volatile List<FireDto>           cachedFires    = List.of();
+    // List.of --> Collections.emptyList()
+    private volatile List<FireDto>           cachedFires    = List.of(); // pour éviter les NullPointerException dans le dispatch quand le simulateur n'est pas encore prêt ou en cas d'erreur de polling
     private volatile List<VehicleDto>        cachedVehicles = List.of();
     private volatile List<EmergencyEventDto> cachedEvents   = List.of();
 
-    private volatile int  lastFireCount       = -1;
+    private volatile int  lastFireCount       = -1; // pour éviter de spammer les logs quand rien ne change
     private volatile int  lastEventCount      = -1;
     private volatile long lastEventRemaining  = -1;
 
@@ -55,7 +56,7 @@ public class EventPollerThread {
         try {
             List<FireDto>           fires    = fireClient.getAllFires();
             List<EmergencyEventDto> events   = rpEventClient.getAllEvents();
-            List<VehicleDto>        vehicles = vehicleClient.getVehiclesByTeam(teamUuid); //ne prend que les dispos
+            List<VehicleDto>        vehicles = vehicleClient.getVehiclesByTeam(teamUuid);
 
             if (fires    != null) this.cachedFires    = fires;
             if (events   != null) this.cachedEvents   = events;
@@ -67,7 +68,7 @@ public class EventPollerThread {
                     log.info("Feux actifs : {}", fireCount);
                     lastFireCount = fireCount;
                 }
-                emergencyManagerService.dispatchAll(fires, vehicles);
+                emergencyManagerService.dispatchAllFires(fires, vehicles);
             } else {
                 if (lastFireCount != 0) {
                     log.info("Aucun feu actif.");
@@ -77,32 +78,32 @@ public class EventPollerThread {
 
             List<EmergencyEventDto> allEvents = new ArrayList<>(events != null ? events : List.of());
 
-// Ajouter les blessés des feux comme faux events
+            // Ajouter les blessés des feux comme faux events pour les dispatcher aussi (le simulateur ne les gère pas comme des events à part entière, mais ça nous intéresse de les traiter dans le même flux que les autres events pour la logique de dispatch et de traitement des véhicules)
             if (fires != null) {
                 fires.stream()
                         .filter(f -> f.getInjuredPeopleDtoList() != null && !f.getInjuredPeopleDtoList().isEmpty())
-                        .forEach(f -> {
-                            EmergencyEventDto e = new EmergencyEventDto();
-                            e.setId(-f.getId());
-                            e.setEventType(EmergencyType.PERSONAL_INJURY);
-                            e.setIntensity(0f);
+                        .forEach(f -> { // pour chaque feu avec des personnes bléssés :
+                            EmergencyEventDto e = new EmergencyEventDto(); // on lui assigne son event d'mergency
+                            e.setId(-f.getId()); // on lui donne un ID négatif pour éviter les conflits avec les events réels du simulateur (qui ont tous des IDs positifs)
+                            e.setEventType(EmergencyType.PERSONAL_INJURY); // on le catégorise comme un event de blessé
+                            e.setIntensity(0f); // l'intensité n'a pas de sens pour un event de blessé, on la met à 0
                             e.setLon(f.getLon());
                             e.setLat(f.getLat());
                             e.setInjuredPeopleDtoList(f.getInjuredPeopleDtoList());
-                            allEvents.add(e);
+                            allEvents.add(e); // on l'ajoute à la liste des events à dispatcher (avec tous les autres events réels du simulateur)
                         });
             }
 
-            if (!allEvents.isEmpty()) {
+            if (!allEvents.isEmpty()) { // eviter logs répétitifs
                 int eventCount = allEvents.size();
                 if (eventCount != lastEventCount) {
-                    log.info("Events actifs (dont blessés sur feux) : {}", eventCount);
+                    log.info("Events actifs (dont blessés sur feux comptés comme des events en plus) : {}", eventCount);
                     lastEventCount = eventCount;
                 }
-                long remaining = allEvents.stream()
-                        .filter(ev -> ev.getInjuredPeopleDtoList() != null)
-                        .flatMap(ev -> ev.getInjuredPeopleDtoList().stream())
-                        .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0)
+                long remaining = allEvents.stream() // log pour compter le nombre de personnes bléssées
+                        .filter(ev -> ev.getInjuredPeopleDtoList() != null) // ev = chaque event de la liste de tous les events
+                        .flatMap(ev -> ev.getInjuredPeopleDtoList().stream()) // .flatMap() = pour chaque event, on récupère sa liste de personnes bléssées (getInjuredPeopleDtoList) et on les met à plat dans un seul stream de personnes bléssées (au lieu d'avoir un stream d'events avec chacun une liste de personnes bléssées)
+                        .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0) // on ne compte que les personnes bléssées avec une intensité de blessure > 0 (intensité = 0 signifie pas de blessure, donc on les ignore)
                         .count();
                 if (remaining != lastEventRemaining) {
                     if (remaining > 0) log.info("{} blessé(s) restants à traiter", remaining);

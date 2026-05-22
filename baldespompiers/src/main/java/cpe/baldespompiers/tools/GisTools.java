@@ -21,6 +21,7 @@ public class GisTools {
     public static final int SIR_4326=4326;
     public static final int SIR_3857=3857;
 
+
     public static Coord transformCoord(Coord source,String targetedProjection) {
 
         CoordinateReferenceSystem sourceCRS;
@@ -85,7 +86,7 @@ public class GisTools {
         if (consumptionPer100km <= 0) return true;
 
         double distAllerKm   = computeDistance2(new Coord(vehicle.getLon(), vehicle.getLat()),
-                                                new Coord(targetLon, targetLat)) / 1000.0;
+                                                new Coord(targetLon, targetLat)) / 1000.0; // divisé par 1000 pour convertir en km car computeDistance2 retourne une distance en mètres
         double distRetourKm  = computeDistance2(new Coord(targetLon, targetLat),
                                                 new Coord(facilityLon, facilityLat)) / 1000.0;
         double fuelNeeded = (distAllerKm + distRetourKm) * consumptionPer100km / 100.0;
@@ -107,6 +108,7 @@ public class GisTools {
     }
 
     public static int computeDistance2(Coord c1, Coord c2) {
+        // Transforme les coordonnées en projection métrique (EPSG:3857) pour calculer la distance en mètres
         c1.setProjection(""+SIR_4326);
         c2.setProjection(""+SIR_4326);
         Coord c1trans=GisTools.transformCoord(c1, ""+SIR_3857);

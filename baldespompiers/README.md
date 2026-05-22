@@ -277,18 +277,19 @@ cpefighter/
 - **FAIT** : distance prise en compte dans le score via `distanceWeight` (×300) dans `vehicleScore` — un véhicule proche est favorisé, ce qui couvre implicitement les waypoints OSRM (plus de waypoints = plus de distance = score plus bas)
 - **FAIT** : dispatch pour les events (`road_accident` & `personal_injury`) — `RPEventService.dispatchEvents()` score et affecte les véhicules aux événements ; `moveVehicleToEvent()` gère le déplacement, l'attente de résolution, la redirection si l'event est résolu en route (`redirectAfterEventGone`) et le retour caserne si ressources insuffisantes
 - Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et rentre à la caserne → à changer ?
+- **FAIT** : stratégie abandon feux faibles — `dispatchFires` filtre les feux avec `intensité ≤ abandonIntensity + 2` (marge de +2 pour éviter de retourner en boucle sur un feu quasi-éteint) ; les feux sur caserne ignorent ce seuil (`threshold = 0`)
+- **FAIT** : vérification carburant aller-retour avant dispatch — `GisTools.hasFuelToReach(vehicle, fireLon, fireLat, facilityLon, facilityLat)` calcule si le véhicule a assez de carburant pour aller au feu ET revenir à la caserne ; utilisé dans `candidates()` de `FireService` et dans `RPEventService`
+- **FAIT** : logs non répétitifs — `waitForFireOut` et `waitForEventOut` ne loggent l'intensité que lorsqu'elle change (variable locale `lastIntensity: float`) ; `waitForRecharge` idem pour fuel/liquid ; nombre de blessés restants centralisé dans `EventPollerThread` via `lastEventRemaining` (même pattern que `lastFireCount`)
+- **FAIT** : frontend rafraîchissement automatique toutes les 3 s avec interface véhicules améliorée (vehicles.html + vehicles.js refactorisés)
+- **FAIT** : pool de threads corrigé dans `AppConfig` — nombre de threads `vehicleMovementExecutor` ajusté pour éviter les blocages lors des dispatches simultanés
 
 # @TODO :
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
 - actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
-- STRATEGIE : Laisser les feux à environ 3 ou 4 d'intensité, les considérer comme éteint et laisser les autres equipes aller les finir pour qu'elles perdent du temps (à patcher si toutes les equipes trient les feux par ordre d'intensité décroissante)
-
-
 - Changement de liquide automatiquement à la caserne si un véhicule n'a pas de feu de son type de liquide à eteindre, pour éviter qu'il attente à la caserne alors qu'il pourrait être utile sur un feu d'un autre type (ex : un véhicule à eau qui attend alors qu'il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
 - Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d'origine)
-
-
 - Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l'intensité du feu (pour éviter les retours à la caserne inutiles)
-- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel.  pour savoir s'il doit faire le plein avant de partir ou pas
+- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s'il doit faire le plein avant de partir ou pas
 - Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
+- Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d'un camion avec le bon anti-feu

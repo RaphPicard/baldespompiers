@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+
 import java.util.List;
 
 @Component
@@ -32,8 +33,9 @@ public class EventPollerThread {
     private volatile List<VehicleDto>        cachedVehicles = List.of();
     private volatile List<EmergencyEventDto> cachedEvents   = List.of();
 
-    private volatile int lastFireCount = -1; // pour ne pas afficher les logs si ca bouge pas
-    private volatile int lastEventCount = -1;
+    private volatile int  lastFireCount       = -1;
+    private volatile int  lastEventCount      = -1;
+    private volatile long lastEventRemaining  = -1;
 
 
 
@@ -78,12 +80,22 @@ public class EventPollerThread {
                     log.info("Events actifs : {}", eventCount);
                     lastEventCount = eventCount;
                 }
+                long remaining = events.stream()
+                        .filter(ev -> ev.getInjuredPeopleDtoList() != null)
+                        .flatMap(ev -> ev.getInjuredPeopleDtoList().stream())
+                        .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0)
+                        .count();
+                if (remaining != lastEventRemaining) {
+                    if (remaining > 0) log.info("{} blessé(s) restants à traiter", remaining);
+                    lastEventRemaining = remaining;
+                }
                 emergencyManagerService.dispatchAllEvents(events, vehicles);
             } else {
                 if (lastEventCount != 0) {
                     log.info("Aucun event actif.");
                     lastEventCount = 0;
                 }
+                lastEventRemaining = 0;
             }
 
         } catch (Exception e) {

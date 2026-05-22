@@ -12,7 +12,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-
+import cpe.baldespompiers.model.type.EmergencyType;
+import java.util.ArrayList;
 
 import java.util.List;
 
@@ -74,13 +75,31 @@ public class EventPollerThread {
                 }
             }
 
-            if (events != null && !events.isEmpty()) {
-                int eventCount = events.size();
+            List<EmergencyEventDto> allEvents = new ArrayList<>(events != null ? events : List.of());
+
+// Ajouter les blessés des feux comme faux events
+            if (fires != null) {
+                fires.stream()
+                        .filter(f -> f.getInjuredPeopleDtoList() != null && !f.getInjuredPeopleDtoList().isEmpty())
+                        .forEach(f -> {
+                            EmergencyEventDto e = new EmergencyEventDto();
+                            e.setId(-f.getId());
+                            e.setEventType(EmergencyType.PERSONAL_INJURY);
+                            e.setIntensity(0f);
+                            e.setLon(f.getLon());
+                            e.setLat(f.getLat());
+                            e.setInjuredPeopleDtoList(f.getInjuredPeopleDtoList());
+                            allEvents.add(e);
+                        });
+            }
+
+            if (!allEvents.isEmpty()) {
+                int eventCount = allEvents.size();
                 if (eventCount != lastEventCount) {
-                    log.info("Events actifs : {}", eventCount);
+                    log.info("Events actifs (dont blessés sur feux) : {}", eventCount);
                     lastEventCount = eventCount;
                 }
-                long remaining = events.stream()
+                long remaining = allEvents.stream()
                         .filter(ev -> ev.getInjuredPeopleDtoList() != null)
                         .flatMap(ev -> ev.getInjuredPeopleDtoList().stream())
                         .filter(p -> p.getInjuryDto() != null && p.getInjuryDto().getIntensity() > 0)
@@ -89,7 +108,7 @@ public class EventPollerThread {
                     if (remaining > 0) log.info("{} blessé(s) restants à traiter", remaining);
                     lastEventRemaining = remaining;
                 }
-                emergencyManagerService.dispatchAllEvents(events, vehicles);
+                emergencyManagerService.dispatchAllEvents(allEvents, vehicles);
             } else {
                 if (lastEventCount != 0) {
                     log.info("Aucun event actif.");

@@ -38,7 +38,7 @@ public class EmergencyManagerService {
     private String teamUuid;
 
     public EmergencyManagerService(VehicleMovementThread vehicleMovementThread,
-                                   @Lazy FireService fireService,
+                                   @Lazy FireService fireService, //@Lazy pour éviter la dépendance circulaire (EmergencyManagerService → FireService → EventPollerThread → EmergencyManagerService)
                                    @Lazy RPEventService rpEventService) {
         this.vehicleMovementThread = vehicleMovementThread;
         this.fireService           = fireService;
@@ -61,33 +61,36 @@ public class EmergencyManagerService {
     public Set<Integer> getRecallRequestedIds() { return recallRequestedIds; }
 
     // ── Dispatch feux ─────────────────────────────────────────────────────────
-    public void dispatchAll(List<FireDto> fires, List<VehicleDto> vehicles) {
-        if (recallMode.get()) { log.debug("dispatchAll skip (mode rappel)"); return; }
-        fireService.dispatchFires(fires, vehicles);
+    public void dispatchAllFires(List<FireDto> fires, List<VehicleDto> vehicles) {
+        if (recallMode.get()) { log.debug("dispatchAll skip (mode rappel)"); return; } // guard pour le bouton de rappel global
+        fireService.dispatchFires(fires, vehicles); // ca va FILTRER et TRIER les feux PUIS appeler dispatch d'en dessous
     }
 
-    public void dispatch(VehicleDto vehicle, FireDto fire) {
+    public void dispatch(VehicleDto vehicle, FireDto fire) { // appelée dans FireService
         log.info("Dispatch véhicule {} → feu #{} (intensité={})",
                 vehicle.getId(), fire.getId(), fire.getIntensity());
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
         assignedFires.add(fire.getId());
         vehicleMovementThread.moveVehicle(
-                vehicle, fire, teamUuid,
+                vehicle, fire, teamUuid,    // si jamais le teamUuid ne sert à rien ici on peut l'enlever, et de move vehicle aussi et ...
                 () -> onArrived(vehicle.getId(), fire.getId())
         );
     }
 
     public void onArrived(Integer vehicleId, Integer fireId) {
         log.info("Véhicule {} libéré (feu {})", vehicleId, fireId);
-        vehicleStates.remove(vehicleId);
+        vehicleStates.remove(vehicleId); // retire lui (clé) et son state (valeur) de la map des véhicules en mission
         assignedFires.remove(fireId);
-        recallRequestedIds.remove(vehicleId);
+
+        recallRequestedIds.remove(vehicleId); // si jamais ce véhicule avait été demandé à être rappelé individuellement, on annule cette demande (car il est arrivé à destination et n'est plus en mission) => éviter que le véhicule soit rappelé à la caserne alors qu'il vient d'arriver sur un feu
     }
 
+
+    // pour les events c'est vraiment du COPIER COLLER du code pour le feu ci dessus, à factoriser ?
     // ── Dispatch events ───────────────────────────────────────────────────────
     public void dispatchAllEvents(List<EmergencyEventDto> events, List<VehicleDto> vehicles) {
-        if (recallMode.get()) return;
-        rpEventService.dispatchEvents(events, vehicles);
+        if (recallMode.get()) return; // guard pour le bouton de rappel global
+        rpEventService.dispatchEvents(events, vehicles); // ca va FILTRER et TRIER les events PUIS appeler dispatchEvent d'en dessous
     }
 
     public void dispatchEvent(VehicleDto vehicle, EmergencyEventDto event) {
@@ -96,7 +99,7 @@ public class EmergencyManagerService {
         vehicleStates.put(vehicle.getId(), VehicleState.MOVING);
         assignedEvents.add(event.getId());
         vehicleMovementThread.moveVehicleToEvent(
-                vehicle, event, teamUuid,
+                vehicle, event, teamUuid, // pareil, le teamUuid ne sert à rien ici on peut l'enlever, et de moveVehicleToEvent aussi et ...
                 () -> onEventArrived(vehicle.getId(), event.getId())
         );
     }

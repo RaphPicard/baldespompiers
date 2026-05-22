@@ -2,9 +2,11 @@ package cpe.baldespompiers.api.controller;
 
 import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
 import cpe.baldespompiers.service.VehicleService;
+import cpe.baldespompiers.thread.EventPollerThread;
 import cpe.baldespompiers.thread.VehicleMovementThread;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
@@ -20,17 +22,20 @@ public class VehicleRestCrt {
     private final VehicleClient vehicleClient;
     private final VehicleMovementThread vehicleMovementThread;
     private final EmergencyManagerService emergencyManagerService;
+    private final EventPollerThread poller;
+
     @Value("${simulator.team-uuid:}")
     private String team_uuid;
 
     public VehicleRestCrt(VehicleService vehicleService,
                           VehicleClient vehicleClient,
                           VehicleMovementThread vehicleMovementThread,
-                          EmergencyManagerService emergencyManagerService) {
+                          EmergencyManagerService emergencyManagerService, EventPollerThread poller) {
         this.vehicleService = vehicleService;
         this.vehicleClient = vehicleClient;
         this.vehicleMovementThread = vehicleMovementThread;
         this.emergencyManagerService = emergencyManagerService;
+        this.poller = poller;
     }
 
     @GetMapping
@@ -113,5 +118,11 @@ public class VehicleRestCrt {
     public Map<String, Object> cancelRecallOne(@PathVariable Integer vehicleId) {
         emergencyManagerService.clearRecallRequest(vehicleId);
         return Map.of("recalled", false);
+    }
+
+    /** Retourne les véhicules actifs depuis le cache du poller */
+    @GetMapping
+    public List<FireDto> getAllFires() {
+        return poller.getCachedVehicles();
     }
 }

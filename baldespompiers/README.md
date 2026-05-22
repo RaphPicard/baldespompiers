@@ -286,7 +286,6 @@ cpefighter/
 # @TODO :
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
-- actuellement a la fin d'un feu ca regarde si un véhicule peut aller direct sur un autre feu lui correspondant. Mais ca ne prend pas en compte que d'autres véhicules pourraient être meilleurs que lui → peut-être le faire rentrer à la caserne dans ce cas
 - Changement de liquide automatiquement à la caserne si un véhicule n'a pas de feu de son type de liquide à eteindre, pour éviter qu'il attente à la caserne alors qu'il pourrait être utile sur un feu d'un autre type (ex : un véhicule à eau qui attend alors qu'il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
 - Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d'origine)
 - Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l'intensité du feu (pour éviter les retours à la caserne inutiles)

@@ -170,7 +170,6 @@ public class FireService {
                 .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuelQuantity() >= minFuel)
                 .filter(v -> {                                          // ← filtre CAR
                     if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
                     return v.getLiquidQuantity() >= minLiquid;

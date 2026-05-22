@@ -85,7 +85,6 @@ public class RPEventService {
                         .containsKey(v.getId()))
                 .filter(v -> isCompatibleWithEvent(v, event))
                 .filter(v -> v.getCrewMember() >= minCrew)
-                .filter(v -> v.getFuelQuantity() >= minFuel)
                 .filter(v -> facilityOf(v)
                         .map(f -> GisTools.hasFuelToReach(v, event.getLon(), event.getLat(), f.getLon(), f.getLat()))
                         .orElseGet(() -> GisTools.hasFuelToReach(v, event.getLon(), event.getLat())));

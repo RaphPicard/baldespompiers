@@ -175,8 +175,6 @@ public class FireService {
                     if (v.getType() == VehicleType.CAR) return v.getLiquidQuantity() >= 8f;
                     return v.getLiquidQuantity() >= minLiquid;
                 })
-                // ↓ SUPPRIMER cette ligne — elle écrase le filtre CAR
-                .filter(v -> v.getLiquidQuantity() >= minLiquid)
                 .filter(v -> facilityOf(v)
                         .map(f -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat(), f.getLon(), f.getLat()))
                         .orElseGet(() -> GisTools.hasFuelToReach(v, fire.getLon(), fire.getLat())));
@@ -193,7 +191,6 @@ public class FireService {
                 .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()))
                 .filter(v -> v.getFuelQuantity() >= readyFuel)
-                .filter(v -> v.getLiquidQuantity() >= readyLiquid) // ← SUPPRIMER cette ligne
                 .filter(v -> v.getCrewMember() >= readyCrew);
     }
 

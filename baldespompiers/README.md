@@ -306,5 +306,8 @@ cpefighter/
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s’il doit faire le plein avant de partir ou pas
 - Seuils d’abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
 - Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d’un camion avec le bon anti-feu
-- ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée
+- ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée (donc pourquoi pas pour pas qu'il fasse rien MAIS il faudrait lever une exception dans ce cas pour forcer le fire engine à abandonner l’accident et aller sur le feu électrique dès que ce dernier spawn)
+- Les accidents sont vraiment bien gérés ?
+- Revoir repartition des vehicules ???
+
 -  OPTIONNEL : La gestion de la fatigue : on peut envisager qu’un pompier doive rester inactif pendant un certain temps avant de pouvoir repartir en mission ;

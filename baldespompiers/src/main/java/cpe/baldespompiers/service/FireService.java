@@ -362,6 +362,7 @@ public class FireService {
         // Nettoie les feux qui n'existent plus (éteints ou disparus de la liste)
         Set<Integer> activeIds = fires.stream().map(FireDto::getId).collect(Collectors.toSet()); // feux encore actifs
         lastKnownIntensity.keySet().removeIf(id -> !activeIds.contains(id)); // enleve si plus dans liste des feux actifs
+
     }
 
 

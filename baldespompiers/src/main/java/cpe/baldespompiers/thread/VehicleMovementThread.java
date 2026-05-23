@@ -81,11 +81,11 @@ public class VehicleMovementThread {
     @Value("${dispatch.give_up.liquid:0.0}")
     private float giveUpLiquid;
 
-    @Value("${dispatch.min.fuel:20.0}")
-    private float minFuel;
+    @Value("${dispatch.min.fuelForNewMission:20.0}")
+    private float minFuelForNewMission;
 
-    @Value("${dispatch.min.liquid:20.0}")
-    private float minLiquid;
+    @Value("${dispatch.min.liquidForNewMission:15.0}")
+    private float minLiquidForNewMission;
 
     // Seuils "prêt" : atteints à la caserne avant de libérer le véhicule pour un nouveau dispatch
     @Value("${dispatch.ready.fuel:40.0}")
@@ -120,6 +120,10 @@ public class VehicleMovementThread {
     private static final class ResumeMissionException extends RuntimeException {
         ResumeMissionException(String msg) { super(msg, null, true, false); }
     }
+    // Signal : repositionnement annulé car un dispatch est arrivé
+    private static final class RepositioningCancelledException extends RuntimeException {
+        RepositioningCancelledException() { super(null, null, true, false); }
+    }
     // Signal : feu éteint par une autre équipe pendant le trajet vers lui
     private static final class FireGoneException extends RuntimeException {
         FireGoneException(String msg) { super(msg, null, true, false); }
@@ -130,14 +134,15 @@ public class VehicleMovementThread {
         TO_FIRE,            // recall actif → abandonne, retourne caserne
         TO_EVENT,           // idem TO_FIRE mais cible un event (blessé/accident)
         TO_FACILITY,        // ignore recallMode (déplacement libre)
-        MANUAL              // retour recall : interruptible si recall désactivé en cours de route
+        MANUAL,             // retour recall : interruptible si recall désactivé en cours de route
+        TO_REPOSITION       // repositionnement vers centroïde : annulable si dispatch reçu
     }
 
     // ── Après exctinction d'un feu ? ───────────────────────────────────────────
     private boolean vehicleNeedsRecharge(VehicleDto v) {
-        if (v.getFuelQuantity() < minFuel) return true; // carburant trop bas pour une nouvelle mission
+        if (v.getFuelQuantity() < minFuelForNewMission) return true; // carburant trop bas pour une nouvelle mission
         // Pour les véhicules avec réservoir (camions, pas ambulances) : vérifie aussi le liquide extincteur
-        return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquid;
+        return v.getType() != null && v.getType().getLiquidCapacity() > 0 && v.getLiquidQuantity() < minLiquidForNewMission;
     }
 
     // ── Point d'entrée principal ───────────────────────────────────────────────
@@ -145,7 +150,8 @@ public class VehicleMovementThread {
     @Async("vehicleMovementExecutor")
     public void moveVehicle(VehicleDto vehicle, FireDto initialFire, String teamUuid, Runnable onDone) { // appelé dans le dispatch de emergencyManagerService
         FireDto currentFire = initialFire;
-        boolean needsRecharge = false;
+        boolean needsRecharge  = false;
+        boolean willReposition = false; // true uniquement si next.isEmpty() avec des feux actifs → charge à 100%
         try {
             while (true) {
                 // Phase 1 : déplacer le véhicule vers le feu (mode téléport, ligne droite ou route selon config)
@@ -194,9 +200,11 @@ public class VehicleMovementThread {
                         refreshed, activeFires != null ? activeFires : List.of());
 
                 if (next.isEmpty()) {
-                    // Aucun feu disponible → le véhicule est libéré (onDone le remettra à disposition)
-                    log.info("Véhicule {} opérationnel MAIS aucun feu disponible, retour libre (caserne)", vehicle.getId());
-                    needsRecharge = true;  // a commenter si on ne veut pas qu'il rentre à la caserne
+                    // Aucun feu disponible / compatible : si des feux actifs existent → charge à 100% puis reposition, sinon retour caserne normal
+                    List<FireDto> activeForReposition = (activeFires != null ? activeFires : List.<FireDto>of()).stream()
+                            .filter(f -> f.getIntensity() > abandonIntensity).toList();
+                    willReposition = !activeForReposition.isEmpty(); // on repositionne si on peut calculer les centroïdes ==> si ya des feux actifs
+                    needsRecharge  = true;
                     break;
                 }
 
@@ -223,10 +231,11 @@ public class VehicleMovementThread {
         } finally {
             try {
                 fireService.releaseFire(currentFire.getId());
-                if (needsRecharge) { // soit rappel demandé des/du véhicule OU insuffisance liquid/essence OU erreur
+                if (needsRecharge) {
                     try {
                         returnToFacility(vehicle);
-                        waitForRecharge(vehicle.getId());
+                        waitForRecharge(vehicle.getId(), willReposition); // true → charge à 100% (avant reposition), false → seuils ready (dispatch rapide)
+                        if (willReposition) repositionToCentroid(vehicle, null);
                     } catch (ResumeMissionException e) {
                         // recallMode désactivé en cours de retour → on libère le véhicule
                         // (le prochain dispatch le récupèrera, qu'il soit ou non à la caserne)
@@ -240,12 +249,49 @@ public class VehicleMovementThread {
         }
     }
 
+    private boolean repositionToCentroid(VehicleDto vehicle, List<FireDto> knownFires) {
+        List<FireDto> all = (knownFires != null) ? knownFires : fireClient.getAllFires();
+        if (all == null) return false;
+        List<FireDto> active = all.stream().filter(f -> f.getIntensity() > 0).toList(); // on garde les feux pas eteints (guard)
+        if (active.isEmpty()) return false;
+        double cLon = active.stream().mapToDouble(FireDto::getLon).average().orElse(0); // on calcule les centroïdes
+        double cLat = active.stream().mapToDouble(FireDto::getLat).average().orElse(0);
+        emergencyManagerService.repositionVehicle(vehicle, cLon, cLat);
+        return true;
+    }
+    // |
+    // |
+    // v
+
+    /**
+     * Déplace un véhicule idle vers le centroïde des feux actifs.
+     * Interruptible à chaque pas si un dispatch arrive (isRepositioning() revient false).
+     * Wrapper public @Async autour de movement_type, utilisé par /api/vehicles/{id}/move
+     * pour respecter la vitesse max du simulateur.
+     */
+    @Async("vehicleMovementExecutor")
+    public void repositionVehicle(VehicleDto vehicle, double clon, double clat) {
+        try {
+            movement_type(vehicle, teamUuid, clon, clat, MovePhase.TO_REPOSITION, null); // repositionnement aux centroïdes
+            log.debug("Véhicule {} arrivé au centroïde ({}, {})", vehicle.getId(), clon, clat);
+        } catch (RepositioningCancelledException e) { // si le isRepositioning devient false en cours de route → on arrête le repositionnement (le dispatch qui a reçu le véhicule va s'occuper de le déplacer vers son feu)
+            log.debug("Véhicule {} : repositionnement annulé (dispatch reçu)", vehicle.getId());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
+            log.warn("Repositionnement véhicule {} : {}", vehicle.getId(), e.getMessage());
+        } finally {
+            emergencyManagerService.stopRepositioning(vehicle.getId());
+        }
+    }
+
     // ── moveVehicleToEvent (accidents/blessés) ────────────────────────────────
     @Async("vehicleMovementExecutor")
     public void moveVehicleToEvent(VehicleDto vehicle, EmergencyEventDto initialEvent,
                                    String teamUuid, Runnable onDone) {
         EmergencyEventDto currentEvent = initialEvent;
-        boolean needsRecharge = false;
+        boolean needsRecharge  = false;
+        boolean willReposition = false;
         try {
             while (true) {
                 // Phase 1 : aller sur l'event, en détectant si l'event est résolu en route
@@ -256,7 +302,7 @@ public class VehicleMovementThread {
                     log.info("Véhicule {} : event #{} résolu en route — recherche d'un autre event",
                             vehicle.getId(), currentEvent.getId());
                     EmergencyEventDto redirect = redirectAfterEventGone(vehicle, currentEvent);
-                    if (redirect == null) { needsRecharge = true; break; } // aucun event disponible → retour caserne avant libération
+                    if (redirect == null) { needsRecharge = true; break; } // aucun event disponible → retour caserne avant replacement centroïdes
                     currentEvent = redirect;
                     continue;
                 }
@@ -270,12 +316,36 @@ public class VehicleMovementThread {
                         vehicle.getId(), currentEvent.getId());
                 waitForEventOut(currentEvent.getId(), vehicle.getId());
 
-                // Vérifier ressources après intervention
+                // Relit les vraies ressources depuis le simulateur
                 VehicleDto refreshed = vehicleClient.getVehicleById(String.valueOf(vehicle.getId()));
                 if (refreshed == null || vehicleNeedsRecharge(refreshed)) {
                     needsRecharge = true;
+                    break; // on envoie à la recharge avec willReposition = False pour une charge rapide
                 }
-                break; // mission terminée
+                vehicle.setLon(refreshed.getLon());
+                vehicle.setLat(refreshed.getLat());
+
+                // Mode rappel : retour caserne immédiat
+                if (emergencyManagerService.isRecallRequested(vehicle.getId())) { needsRecharge = true; break; }
+
+                // Ressources suffisantes : cherche un autre event directement, sans passer par la caserne
+                List<EmergencyEventDto> activeEvents = rpEventClient.getAllEvents();
+                Optional<EmergencyEventDto> next = rpEventService.findNextEventForVehicle(
+                        refreshed, activeEvents != null ? activeEvents : List.of());
+
+                if (next.isEmpty()) {
+                    List<FireDto> firesForReposition = fireClient.getAllFires();
+                    willReposition = firesForReposition != null &&
+                            firesForReposition.stream().anyMatch(f -> f.getIntensity() > abandonIntensity);
+                    needsRecharge = true; // on renvoie à la recharge avec willReposition = true Pour une charge à 100% avant redirection centroïdes
+                    break;
+                }
+
+                EmergencyEventDto nextEvent = next.get();
+                log.info("Véhicule {} : ressources suffisantes (fuel={} liquid={}), direct sur event #{} (sans caserne)",
+                        vehicle.getId(), refreshed.getFuelQuantity(), refreshed.getLiquidQuantity(), nextEvent.getId());
+                rpEventService.claimEvent(vehicle.getId(), currentEvent.getId(), nextEvent.getId());
+                currentEvent = nextEvent;
             }
 
         } catch (InsufficientResourcesException e) {
@@ -295,7 +365,8 @@ public class VehicleMovementThread {
                 if (needsRecharge) {
                     try {
                         returnToFacility(vehicle);
-                        waitForRecharge(vehicle.getId());
+                        waitForRecharge(vehicle.getId(), willReposition);
+                        if (willReposition) repositionToCentroid(vehicle, null); // on ne repositionne aux centroïdes que si il n'a rien à faire
                     } catch (ResumeMissionException e) {
                         log.info("Véhicule {} : retour event interrompu", vehicle.getId());
                     }
@@ -339,22 +410,28 @@ public class VehicleMovementThread {
     }
 
     /**
-     * Rappel d'un véhicule inactif (pas en mission) vers sa caserne.
+     * Rappel d'un véhicule inactif (pas en mission) vers sa caserne. Pour ensuite le positionner au centroïde.
      * Utilisé par le recall-all pour rapatrier les véhicules qui n'ont plus de thread actif.
+     * Wrapper public @Async autour de movement_type, utilisé par /api/vehicles/{id}/move
+     * pour respecter la vitesse max du simulateur.
      */
     @Async("vehicleMovementExecutor")
     public void recallIdleVehicle(VehicleDto vehicle, Runnable onDone) {
+        boolean repositioningStarted = false;
         try {
             returnToFacility(vehicle);
-            waitForRecharge(vehicle.getId());
+            waitForRecharge(vehicle.getId(), true);
+            repositioningStarted = repositionToCentroid(vehicle, null); // retourne true une fois le repositionnement fait
         } catch (ResumeMissionException e) {
             log.info("Véhicule inactif {} : retour annulé (rappel désactivé en cours de route)", vehicle.getId());
         } catch (Exception e) {
             log.warn("Rappel véhicule inactif {} : {}", vehicle.getId(), e.getMessage());
         } finally {
+            if (!repositioningStarted) emergencyManagerService.stopRepositioning(vehicle.getId()); // si repositionToCentroid n'a pas démarré, on nettoie nous-mêmes (si pas de feux actif)
             if (onDone != null) onDone.run();
         }
     }
+
 
     /**
      * Déplacement progressif vers une coordonnée arbitraire (sans logique feu/caserne).
@@ -539,6 +616,9 @@ public class VehicleMovementThread {
             if (phase == MovePhase.MANUAL && !emergencyManagerService.isRecallMode()
                     && !emergencyManagerService.isRecallRequested(vehicleId))
                 throw new ResumeMissionException("rappel terminé — abandon retour caserne");
+            // Repositionnement : annulé si dispatch reçu (le remove de repositioningVehicles est fait dans dispatch())
+            if (phase == MovePhase.TO_REPOSITION && !emergencyManagerService.isRepositioning(vehicleId))
+                throw new RepositioningCancelledException();
 
 
 
@@ -765,18 +845,20 @@ public class VehicleMovementThread {
     // ── Attente du rechargement à la caserne ──────────────────────────────────
 
     /**
-     * Attend que le véhicule atteigne les seuils readyFuel et readyLiquid
-     * (rechargement automatique par le simulateur quand le véhicule est à la caserne).
-     * Ne bloque pas si le type de véhicule n'a pas de capacité liquide/fuel (ex. ambulance).
+     * Attend que le véhicule soit rechargé à la caserne.
+     * waitForFull=false → seuils readyFuel/readyLiquid (prêt pour dispatch)
+     * waitForFull=true  → 100% de capacité (avant repositionnement au centroïde)
      */
-    private void waitForRecharge(Integer vehicleId) throws InterruptedException {
+    private void waitForRecharge(Integer vehicleId, boolean waitForFull) throws InterruptedException {
         VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
         if (vehicle == null || vehicle.getType() == null) return; // guard inutile ???
 
-        // Détermine ce qui manque : carburant, liquide, ou les deux
-        boolean needsFuel   = vehicle.getFuelQuantity() < readyFuel;
-        boolean needsLiquid = vehicle.getType().getLiquidCapacity() > 0 && vehicle.getLiquidQuantity() < readyLiquid;
-        if (!needsFuel && !needsLiquid) return; // déjà chargé comme il faut → pas besoin d'attendre
+        float fuelThreshold   = waitForFull ? vehicle.getType().getFuelCapacity() - 1  : readyFuel;     // -1 car ca ne recharge pas à 60.0 mais ca s'arrete à 59,9 ...
+        float liquidThreshold = waitForFull ? vehicle.getType().getLiquidCapacity() - 1 : readyLiquid;
+
+        boolean needsFuel   = vehicle.getFuelQuantity() < fuelThreshold;
+        boolean needsLiquid = vehicle.getType().getLiquidCapacity() > 0 && vehicle.getLiquidQuantity() < liquidThreshold;
+        if (!needsFuel && !needsLiquid) return;
 
         log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})", vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
 
@@ -786,18 +868,17 @@ public class VehicleMovementThread {
             Thread.sleep(fireCheckDelayMs);
             vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
             if (vehicle == null) break; // guard inutile ???
-            boolean fuelOk   = vehicle.getFuelQuantity()  >= readyFuel;
-            // Les ambulances (liquidCapacity == 0) sont toujours considérées "ok" côté liquide
-            boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= readyLiquid;
-            if (fuelOk && liquidOk) break; // dès que les deux sont chargés, on arrête d'attendre (même si un des deux était déjà ok au départ)
+            boolean fuelOk   = vehicle.getFuelQuantity() >= fuelThreshold;
+            boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= liquidThreshold;
+            if (fuelOk && liquidOk) break;
             float fuel   = vehicle.getFuelQuantity();
             float liquid = vehicle.getLiquidQuantity();
-            if (fuel != lastFuel || liquid != lastLiquid) { // pour éviter de logguer à chaque pas quand les valeurs ne changent pas
+            if (fuel != lastFuel || liquid != lastLiquid) {
                 log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, fuel, liquid);
                 lastFuel   = fuel;
                 lastLiquid = liquid;
             }
         }
-        log.info("Véhicule {} rechargé — prêt pour une nouvelle mission", vehicleId);
+        log.info("Véhicule {} rechargé — prêt pour repositionnement / une nouvelle mission", vehicleId);
     }
 }

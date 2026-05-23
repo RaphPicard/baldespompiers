@@ -62,7 +62,7 @@ public class RPEventService {
     private boolean isCompatibleWithEvent(VehicleDto v, EmergencyEventDto event) {
         if (v.getType() == null || event.getEventType() == null) return false;
         return v.getType().getEfficiencyMap()
-                .getOrDefault(event.getEventType(), 0f) > 0;
+                .getOrDefault(event.getEventType(), 0f) > 2f; //
     }
 
     // ── Score d'aptitude pour un event ────────────────────────────────────────

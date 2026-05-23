@@ -282,18 +282,25 @@ cpefighter/
 - **FAIT** : logs non répétitifs — `waitForFireOut` et `waitForEventOut` ne loggent l'intensité que lorsqu'elle change (variable locale `lastIntensity: float`) ; `waitForRecharge` idem pour fuel/liquid ; nombre de blessés restants centralisé dans `EventPollerThread` via `lastEventRemaining` (même pattern que `lastFireCount`)
 - **FAIT** : frontend rafraîchissement automatique toutes les 3 s avec interface véhicules améliorée (vehicles.html + vehicles.js refactorisés)
 - **FAIT** : pool de threads corrigé dans `AppConfig` — nombre de threads `vehicleMovementExecutor` ajusté pour éviter les blocages lors des dispatches simultanés
+- **FAIT** : détection feux en cours d’extinction par une autre équipe — `lastKnownIntensity` (map id→intensité du tick précédent) dans `FireService` ; si l’intensité d’un feu non-assigné baisse entre deux ticks → ajout dans `beingExtinguishedByOthers` → critère de tri 0 dans `dispatchFires` (déprioritisé mais pas ignoré) ; map nettoyée des feux disparus à chaque tick
+- **FAIT** : repositionnement automatique au centroïde des feux actifs quand un véhicule est inactif et chargé à 100% :
+    - `MovePhase.TO_REPOSITION` + `RepositioningCancelledException` dans `VehicleMovementThread` — le thread de repositionnement s’annule immédiatement à son prochain pas si un dispatch arrive
+    - `repositioningVehicles` (ConcurrentHashMap.newKeySet) dans `EmergencyManagerService` — garde les véhicules en cours de repositionnement sans les masquer au dispatch (ils restent candidats)
+    - `repositionToCentroid()` calcule la moyenne lon/lat des feux actifs et lance `repositionVehicle()` async
+    - `waitForRecharge(boolean waitForFull)` — `true` attend 100% de capacité (avant repositionnement), `false` attend les seuils `readyFuel`/`readyLiquid` (dispatch rapide)
+    - `willReposition` flag dans `moveVehicle()` et `moveVehicleToEvent()` : mis à `true` si `next.isEmpty()` et des feux actifs existent → charge à 100% puis repositionne, sinon charge aux seuils ready
+    - `repositionIdleVehicles()` dans `EmergencyManagerService` appelée à chaque tick de dispatch : détecte les véhicules inactifs (hors `vehicleStates` et `repositioningVehicles`), les marque atomiquement via `repositioningVehicles.add()` et lance `recallIdleVehicle()` (caserne → recharge 100% → centroïde)
+- **FAIT** : chaînage direct feu→feu et event→event sans repasser par la caserne — après extinction/résolution, si les ressources sont suffisantes, `findNextFireForVehicle` / `findNextEventForVehicle` est appelé ; si un candidat existe, `claimFire` / `claimEvent` transfère l’assignation atomiquement et le véhicule repart directement ; si aucun candidat, `willReposition` décide si on charge à 100% pour se repositionner ou aux seuils ready pour rester disponible
+- **FAIT** : correction bug de concurrence — quand un dispatch arrive pendant qu’un véhicule est dans `recallIdleVehicle` (retour caserne + recharge + repositionnement), l’ancien thread s’arrête proprement : `returnToFacility` utilise la phase `TO_REPOSITION` (interruptible) au lieu de `TO_FACILITY` ; `waitForRecharge` capture `wasRepositioning` au démarrage et lève `RepositioningCancelledException` dans ses boucles de polling si le véhicule est dispatché ; `recallIdleVehicle` attrape l’exception et sort immédiatement via le `finally`
+- **FAIT** : correction position de départ stale dans `moveVehicle` et `moveVehicleToEvent` — au lancement du thread async, le `VehicleDto` du poller peut avoir une position obsolète (véhicule vient de rentrer à la caserne mais le poller n’a pas encore rafraîchi) ; ajout d’un refetch `vehicleClient.getVehicleById` en tout début de méthode pour que la première route OSRM parte de la vraie position courante
 
 # @TODO :
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
-- Changement de liquide automatiquement à la caserne si un véhicule n'a pas de feu de son type de liquide à eteindre, pour éviter qu'il attente à la caserne alors qu'il pourrait être utile sur un feu d'un autre type (ex : un véhicule à eau qui attend alors qu'il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
-- Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d'origine)
-- Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l'intensité du feu (pour éviter les retours à la caserne inutiles)
-- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s'il doit faire le plein avant de partir ou pas
-- Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
-- Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d'un camion avec le bon anti-feu
-
--Pourquoi il y a un fire engine special powder qui aille sur un road accident avec 4 injured people --> Si toutes les ambulances occupées alors il y va un peu pour rien. c'est bien parce qu'il a rien à faire mais si ya un feu electrique qui spawn ba il sera occupé pour rien !
-
-- @Todo : détecter si un feu diminue ou pas en live (équipe dessus) et PRIORISER ceux qui ne diminuent pas
-- quand un véhicule est chargé, si il n'est pas dispatché, l’envoyer au milieu de la zone de travail, vers le CENTROÏDE DES FEUX ACTIFS plutôt que de rester à la caserne. Ou vu qu’on a 2 casernes, les faire se placer de manière équilibrée
+- Changement de liquide automatiquement à la caserne si un véhicule n’a pas de feu de son type de liquide à eteindre, pour éviter qu’il attente à la caserne alors qu’il pourrait être utile sur un feu d’un autre type (ex : un véhicule à eau qui attend alors qu’il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
+- Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d’origine)
+- Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l’intensité du feu (pour éviter les retours à la caserne inutiles)
+- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s’il doit faire le plein avant de partir ou pas
+- Seuils d’abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
+- Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d’un camion avec le bon anti-feu
+- ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée

@@ -85,6 +85,7 @@ function eventIconFor(type) {
 }
 
 // ── State ───────────────────────────────────────────────────
+let firesData = []; // rajouté pour afficher la liste des feux
 const fireMarkerById = new Map();      // id -> marker
 const eventMarkerById = new Map();     // id -> marker
 const facilityMarkerById = new Map();  // id -> marker
@@ -189,25 +190,68 @@ function facilityPopup(f) {
   `;
 }
 
+// ── Panneau liste des feux ──────────────────────────────────
+function renderFireList() {
+  /*
+    Affiche la liste des feux dans le panneau latéral, triés par intensité décroissante.
+    Chaque feu affiche son ID, son type et son intensité, avec une couleur verte si l'intensité est ≤ 3 (feu "faible" qu'on laisse s'éteindre seul) ou rouge sinon (feu "fort" à prioriser).
+    Cliquer sur un feu dans la liste centre la carte dessus et ouvre son popup.
+   */
+  const body = document.getElementById('fires-list-body');
+  const badge = document.getElementById('fires-list-badge');
+  if (!body) return;
+  if (badge) badge.textContent = firesData.length; // mise à jour du badge avec le nombre de feux
+  if (firesData.length === 0) {
+    body.innerHTML = '<div class="fires-list-empty">Aucun feu actif</div>';
+    return;
+  }
+  const sorted = [...firesData].sort((a, b) => b.intensity - a.intensity); // tri par intensité décroissante
+  body.innerHTML = sorted.map(f => {
+    const high = f.intensity > LOW_INTENSITY_THRESHOLD;
+    const color  = high ? '#dc2626' : '#16a34a';
+    const bg     = high ? '#fef2f2' : '#f0fdf4';
+    const border = high ? '#fca5a5' : '#86efac';
+    // couleur rouge pour feux forts, vert pour feux faibles, avec un badge d'intensité ⚡ et un style de carte pour différencier les feux faibles (qu'on laisse s'éteindre seuls) des feux forts (à prioriser)
+    return `
+      <div class="fire-list-item" onclick="zoomToFire(${f.id})" style="border-color:${border};background:${bg};"> 
+        <span class="fire-list-id" style="color:${color};">#${f.id}</span>
+        <span class="fire-list-info">${f.type}</span>
+        <span class="fire-list-intensity" style="color:${color};">⚡${f.intensity.toFixed(1)}</span>
+      </div>`;
+  }).join('');
+}
+
+function zoomToFire(id) { // centrer la carte sur un feu cliqué dans le panneau liste
+  const marker = fireMarkerById.get(id); // on suppose que le marker existe encore (si le feu est dans la liste, il devrait être dans les markers), mais on vérifie quand même pour éviter les erreurs si jamais
+  if (!marker) return;
+  map.flyTo(marker.getLatLng(), 17, { duration: 1.2 });
+  setTimeout(() => marker.openPopup(), 1300);
+}
+
+function toggleFiresPanel() { // pour le bouton d'ouverture du panneau liste des feux
+  document.getElementById('fires-list-panel').classList.toggle('collapsed');
+}
+
 // ── Feux ────────────────────────────────────────────────────
 async function fetchFires() {
   try {
     const res = await getFires();
+    firesData = res.data; // mise à jour du cache global des feux pour le panneau liste
     syncMarkersById(
       res.data,
       fireMarkerById,
       f => f.id,
       f => {
         const marker = L.marker([f.lat, f.lon], { icon: fireIconFor(f.intensity) })
-          .bindPopup(firePopup(f), { maxWidth: 320 });
-        marker._isLowIntensity = f.intensity <= LOW_INTENSITY_THRESHOLD;
+          .bindPopup(firePopup(f), { maxWidth: 320 }); // ouverture du popup à 320px de large pour éviter les problèmes de mise en page avec les listes de blessés trop longues
+        marker._isLowIntensity = f.intensity <= LOW_INTENSITY_THRESHOLD; // on stocke cette info dans le marker pour éviter de recalculer l'icône à chaque update (seule la transition entre "faible" et "fort" nécessite un changement d'icône)
         return marker;
       },
-      layerVisibility.fires,
+      layerVisibility.fires, // on ajoute les nouveaux feux à la carte seulement si le layer est visible
       (marker, f) => {
-        marker.setLatLng([f.lat, f.lon]);
-        marker.getPopup().setContent(firePopup(f));
-        const lowNow = f.intensity <= LOW_INTENSITY_THRESHOLD;
+        marker.setLatLng([f.lat, f.lon]); // mise à jour de la position du feu
+        marker.getPopup().setContent(firePopup(f)); // mise à jour du contenu du popup (intensité, blessés, etc.)
+        const lowNow = f.intensity <= LOW_INTENSITY_THRESHOLD; // vérification si le feu est maintenant considéré comme "faible" ou "fort"
         if (marker._isLowIntensity !== lowNow) {
           marker.setIcon(fireIconFor(f.intensity));
           marker._isLowIntensity = lowNow;
@@ -216,6 +260,7 @@ async function fetchFires() {
     );
     setStat('stat-fires', res.data.length);
     setStat('filter-fires-count', res.data.length);
+    renderFireList(); // mise à jour du panneau liste des feux à chaque refresh (pour refléter les changements d'intensité et les nouveaux feux)
   } catch (err) { console.error(err); }
 }
 
@@ -357,7 +402,7 @@ function toggleLayer(name) {
 }
 
 // ── Boot ────────────────────────────────────────────────────
-fetchFires();
+fetchFires(); // premier fetch à part pour pouvoir afficher la liste des feux dans le panneau latéral, qui est un élément clé de notre UI et doit être mis à jour dès que possible (avant même les véhicules, pour avoir les stats et la liste des feux à dispo immédiatement), tandis que les véhicules peuvent se charger juste après sans que ce soit gênant pour l'expérience utilisateur
 fetchEvents();
 fetchFacilities().then(fetchVehicles); // casernes d'abord pour stat "en mission"
 

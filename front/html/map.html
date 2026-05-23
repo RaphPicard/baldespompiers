@@ -61,6 +61,18 @@
       🏠 Casernes <span class="count" id="filter-facilities-count">0</span>
     </div>
   </div>
+
+  <!-- Panneau liste des feux (droite) -->
+  <div class="map-overlay fires-list-panel" id="fires-list-panel">
+    <div class="fires-list-header" onclick="toggleFiresPanel()">
+      <span class="fires-list-title">🔥 Feux actifs</span>
+      <span class="fires-list-badge" id="fires-list-badge">0</span>
+      <span class="fires-list-chevron" id="fires-list-chevron">▲</span>
+    </div>
+    <div id="fires-list-body">
+      <div class="fires-list-empty">Chargement…</div>
+    </div>
+  </div>
 </div>
 </body>
 </html>

@@ -292,3 +292,8 @@ cpefighter/
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s'il doit faire le plein avant de partir ou pas
 - Seuils d'abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
 - Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d'un camion avec le bon anti-feu
+
+-Pourquoi il y a un fire engine special powder qui aille sur un road accident avec 4 injured people --> Si toutes les ambulances occupées alors il y va un peu pour rien. c'est bien parce qu'il a rien à faire mais si ya un feu electrique qui spawn ba il sera occupé pour rien !
+
+- @Todo : détecter si un feu diminue ou pas en live (équipe dessus) et PRIORISER ceux qui ne diminuent pas
+- quand un véhicule est chargé, si il n'est pas dispatché, l’envoyer au milieu de la zone de travail, vers le CENTROÏDE DES FEUX ACTIFS plutôt que de rester à la caserne. Ou vu qu’on a 2 casernes, les faire se placer de manière équilibrée

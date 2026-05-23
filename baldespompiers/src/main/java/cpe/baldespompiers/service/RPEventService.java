@@ -58,7 +58,7 @@ public class RPEventService {
         return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst();
     }
 
-    // ── Vérifie si le véhicule est efficace sur ce type d'event ──────────────
+    // ── Vérifie si le véhicule est efficace sur ce type d'event (supérieur à 0 -> donc même un Fire engine va etre efficace à 20% sur un road event !!!) ───────────────────────────────────────────────
     private boolean isCompatibleWithEvent(VehicleDto v, EmergencyEventDto event) {
         if (v.getType() == null || event.getEventType() == null) return false;
         return v.getType().getEfficiencyMap()
@@ -72,6 +72,7 @@ public class RPEventService {
                 : 0f;
         double dist = distance(v.getLon(), v.getLat(),
                 event.getLon(), event.getLat());
+        // l'efficacité est le facteur le plus important, mais on pénalise aussi la distance (carburant consommé et temps de trajet) et on valorise un peu le carburant restant (car il peut servir pour d'autres events ensuite)
         return efficiency * 50.0
                 - dist * 300.0
                 + v.getFuelQuantity() * 0.1;
@@ -108,10 +109,10 @@ public class RPEventService {
         for (EmergencyEventDto event : filtered) {
             candidates(vehicles, event)
                     .max(Comparator.comparingDouble(v -> eventScore(v, event)))
-                    .ifPresentOrElse(
-                            vehicle -> emergencyManagerService.dispatchEvent(vehicle, event),
-                            () -> log.warn("Event #{} (type={}) — aucun véhicule compatible disponible",
-                                    event.getId(), event.getEventType())
+                    .ifPresent(//OrElse(
+                            vehicle -> emergencyManagerService.dispatchEvent(vehicle, event) //,    // pour éviter les logs répétitifs qui polluent mon terminal
+                            //() -> log.warn("Event #{} (type={}) — aucun véhicule compatible disponible",
+                                    //event.getId(), event.getEventType())
                     );
         }
     }

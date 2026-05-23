@@ -17,8 +17,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Service
@@ -49,6 +51,9 @@ public class FireService {
 
     /** Timestamp du dernier rappel émis par fire ID, pour éviter les rappels répétés. Pour le feu à la caserne */
     private final Map<Integer, Long> recallIssuedAt = new ConcurrentHashMap<>();
+
+    /** Intensité de CHAQUE FEU DE LA MAP au tick précédent, pour détecter si une autre équipe est en train de l'éteindre. */
+    private final Map<Integer, Float> lastKnownIntensity = new ConcurrentHashMap<>();
 
     @Value("${dispatch.abandon.intensity:4}")
     private int abandonIntensity;
@@ -279,24 +284,39 @@ public class FireService {
 
         // Priorité absolue : feux sur une caserne traités avant tout le reste
         fires.stream()
-                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris en charge par un véhicule
+                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // ignore les feux déjà pris en charge par un véhicule (attention, compliqué d'envoyer un camion de pompier ET une ambulance ducoup ???)
                 .forEach(f -> {
                     FacilityDto caserne = caserneOnFire(f);
                     if (caserne != null) handleCasernefire(f, caserne, vehicles);
                 });
+
+        // Détecte les feux dont l'intensité baisse depuis le dernier tick : une autre équipe s'en occupe déjà
+        Set<Integer> beingExtinguishedByOtherTeam = fires.stream()
+                .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // pas encore assigné à notre equipe
+                .filter(f -> {
+                    Float prev = lastKnownIntensity.get(f.getId());
+                    return prev != null && f.getIntensity() < prev; // intensité en baisse → quelqu'un d'autre l'éteint
+                })
+                .map(FireDto::getId) // on garde juste les IDs pour le tri, pas besoin de garder les objets complets
+                .collect(Collectors.toSet()); // les feux en cours d'extinction par d'autres équipes seront traités en dernier, après tous les autres feux (même les feux faibles ou sans blessés), pour ne pas gaspiller nos ressources sur des feux que d'autres équipes sont déjà en train de gérer efficacement
+
+        if (!beingExtinguishedByOtherTeam.isEmpty())
+            log.debug("Feux en cours d'extinction par d'autres équipes (pas en priorité) : {}", beingExtinguishedByOtherTeam);
 
         // Trie les feux pour traiter en priorité ceux qu'il est le plus difficile de couvrir
         // (évite qu'un feu "rare" voie son seul véhicule compatible partir sur un autre feu d'abord)
         List<FireDto> sortedFires = fires.stream()
                 .filter(f -> f.getIntensity() > abandonIntensity + 2) // laisse les feux quasi-éteints aux autres équipes avec une petite marge de +2 pour ne pas y retourner en boucle
                 .sorted(Comparator
+                // 0. Feux non pris en charge par d'autres équipes en premier (intensité stable ou croissante)
+                .comparingInt((FireDto f) -> beingExtinguishedByOtherTeam.contains(f.getId()) ? 1 : 0) //compairingInt trie du plus petit au plus grand, donc les feux avec score 0 (pas en extinction par d'autres équipes) seront traités avant les feux avec score 1 (en extinction par d'autres équipes)
                 // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
-                .comparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
+                .thenComparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
                 // 2. À égalité de compatibilité, les plus intenses d'abord
-                .thenComparingDouble(f -> -f.getIntensity())) // -f pour un tri décroissant
+                .thenComparingDouble(f -> -f.getIntensity())) // -f pour un tri décroissant car comparingDouble trie du plus petit au plus grand, on met un signe moins pour inverser l'ordre et traiter les feux les plus intenses en premier à égalité de compatibilité
                 // 3. Feux sans blessés en premier (libère les véhicules plus vite pour les feux complexes)
                 // .thenComparingInt((FireDto f) -> (f.getInjuredPeopleDtoList() == null || f.getInjuredPeopleDtoList().isEmpty()) ? 0 : 1)
-                .toList();
+                .toList(); // on collecte dans une liste triée pour pouvoir la réutiliser plusieurs fois dans la boucle de dispatch, sans refaire le tri à chaque fois
 
         for (FireDto fire : sortedFires) {
             if (emergencyManagerService.getAssignedFires().contains(fire.getId())) continue; // un véhicule est déjà en route → on passe
@@ -336,6 +356,12 @@ public class FireService {
 //                    }
                     );
         }
+
+        // Mémorise l'intensité de chaque feu actif pour le prochain tick --> SnapShot
+        fires.forEach(f -> lastKnownIntensity.put(f.getId(), f.getIntensity()));
+        // Nettoie les feux qui n'existent plus (éteints ou disparus de la liste)
+        Set<Integer> activeIds = fires.stream().map(FireDto::getId).collect(Collectors.toSet()); // feux encore actifs
+        lastKnownIntensity.keySet().removeIf(id -> !activeIds.contains(id)); // enleve si plus dans liste des feux actifs
     }
 
 

@@ -890,17 +890,21 @@ public class VehicleMovementThread {
         }
 
         // 2) Attendre que la recharge atteigne les seuils
-        float fuelThreshold   = waitForFull ? vehicle.getType().getFuelCapacity() - 1 : readyFuel; // -1 pour éviter que ca recharge que à 59,9... et que ca detecte pas
-        float liquidThreshold = waitForFull ? vehicle.getType().getLiquidCapacity() - 1 : readyLiquid;
+        float fuelCap   = vehicle.getType().getFuelCapacity();
+        float liquidCap = vehicle.getType().getLiquidCapacity();
+        // -1 pour waitForFull (éviter d'attendre 59.9 → 60.0 jamais atteint à cause des arrondis)
+        // min() pour waitForFull=false : si la capacité max du véhicule est < seuil_ready configuré, on plafonne pour éviter une boucle infinie (ex : CAR)
+        float fuelThreshold   = waitForFull ? fuelCap   - 1 : Math.min(readyFuel,   fuelCap);
+        float liquidThreshold = waitForFull ? liquidCap - 1 : Math.min(readyLiquid, liquidCap);
 
         boolean needsFuel   = vehicle.getFuelQuantity() < fuelThreshold;
-        boolean needsLiquid = vehicle.getType().getLiquidCapacity() > 0 && vehicle.getLiquidQuantity() < liquidThreshold;
+        boolean needsLiquid = liquidCap > 0 && vehicle.getLiquidQuantity() < liquidThreshold;
         if (!needsFuel && !needsLiquid) return;
 
         log.info("Véhicule {} en rechargement à la caserne (fuel={} liquid={})",
                 vehicleId, vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
 
-        float lastFuel = vehicle.getFuelQuantity();
+        float lastFuel   = vehicle.getFuelQuantity();
         float lastLiquid = vehicle.getLiquidQuantity();
 
         while (true) {
@@ -912,14 +916,14 @@ public class VehicleMovementThread {
                 throw new RepositioningCancelledException();
 
             boolean fuelOk   = vehicle.getFuelQuantity() >= fuelThreshold;
-            boolean liquidOk = vehicle.getType().getLiquidCapacity() == 0 || vehicle.getLiquidQuantity() >= liquidThreshold;
-            if (fuelOk && liquidOk) break;
+            boolean liquidOk = (liquidCap == 0) || (vehicle.getLiquidQuantity() >= liquidThreshold);
+            if (fuelOk && liquidOk) break; // chargé donc on sort de la boucle
 
-            float fuel = vehicle.getFuelQuantity();
+            float fuel   = vehicle.getFuelQuantity();
             float liquid = vehicle.getLiquidQuantity();
             if (fuel != lastFuel || liquid != lastLiquid) {
                 log.info("[Recharge #{}] fuel={} liquid={}", vehicleId, fuel, liquid);
-                lastFuel = fuel;
+                lastFuel   = fuel;
                 lastLiquid = liquid;
             }
         }

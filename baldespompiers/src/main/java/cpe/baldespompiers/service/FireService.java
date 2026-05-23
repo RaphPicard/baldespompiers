@@ -4,6 +4,7 @@ import cpe.baldespompiers.client.FacilityClient;
 import cpe.baldespompiers.model.dto.FacilityDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
+import cpe.baldespompiers.model.type.EmergencyType;
 import cpe.baldespompiers.model.type.LiquidType;
 import cpe.baldespompiers.model.type.VehicleType;
 import cpe.baldespompiers.tools.GisTools;
@@ -14,6 +15,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,6 +57,9 @@ public class FireService {
     /** Intensité de CHAQUE FEU DE LA MAP au tick précédent, pour détecter si une autre équipe est en train de l'éteindre. */
     private final Map<Integer, Float> lastKnownIntensity = new ConcurrentHashMap<>();
 
+    /** IDs des feux non couverts (traités par aucun véhicule) au dernier tick — pour logguer uniquement lors des changements d'état. */
+    private final Set<Integer> uncoveredFireIds = ConcurrentHashMap.newKeySet();
+
     @Value("${dispatch.abandon.intensity:4}")
     private int abandonIntensity;
 
@@ -82,21 +87,29 @@ public class FireService {
 
 
 
-    // Poids/Importance des paramètres dans le calcul du score des véhicules pour dispatch
-    @Value("${dispatch.efficiency-weight:50.0}")
-    private double efficiencyWeight;
+    // Poids normalisés du vehicleScore — somme = 1.0
+    @Value("${dispatch.w-vehicle:0.40}")
+    private double wVehicle;
 
-    @Value("${dispatch.crewMember-weight:5.0}")
-    private double crewMemberWeight;
+    @Value("${dispatch.w-liquid:0.30}")
+    private double wLiquid;
 
-    @Value("${dispatch.liquid-weight:20.0}")
-    private double liquidWeight;
+    @Value("${dispatch.w-distance:0.20}")
+    private double wDistance;
 
-    @Value("${dispatch.fuel-weight:20.0}")
-    private double fuelWeight;
+    @Value("${dispatch.w-liquid-ratio:0.07}")
+    private double wLiquidRatio;
 
-    @Value("${dispatch.distance-weight:300.0}")
-    private double distanceWeight;
+    @Value("${dispatch.w-fuel:0.03}")
+    private double wFuel;
+
+    // Seuil de distance pour la courbe hyperbole 1/(1+d/dRef), en degrés (≈ 0.018° ≈ 2 km à Lyon)
+    // et 2km est un bon compromis pour privilégier les véhicules proches sans exclure les véhicules plus éloignés qui pourraient être les seuls compatibles pour ce feu
+    @Value("${dispatch.d-ref:0.018}")
+    private double dRef;
+
+    // Efficacité max possible dans l'enum VehicleType (TRUCK.FIRE = 50f)
+    private static final double MAX_VEHICLE_EFFICIENCY = 50.0;
 
 
 
@@ -121,43 +134,55 @@ public class FireService {
     private static double calcule_distance(double lat1, double lon1, double lat2, double lon2) {
         double dLon = lon1 - lon2;
         double dLat = lat1 - lat2;
-        return Math.sqrt(dLon * dLon + dLat * dLat); // en degré... (à changer ?)
+        return Math.sqrt(dLon * dLon + dLat * dLat); // en degrés — cohérent avec dRef (aussi en degrés)
     }
 
     // ── Score d'aptitude ───────────────────────────────────────────────────────
 
     /**
-     * Score d'aptitude d'un véhicule pour un feu donné.
-     * Pondération : efficacité du liquide (priorité absolue) > taille de l'équipage > ressources restantes > distance au feu.
-     * Un véhicule parfaitement compatible (efficiency=1.0) gagne +50, ce qui prime sur
-     * les petites différences de ressources, mais pas sur la taille de l'équipage.
+     * Score normalisé [0, 1] d'un véhicule pour un feu donné.
+     * Formule : somme pondérée de 5 composantes, chacune ∈ [0, 1], poids = 1.0.
+     *
+     * vehicleNorm  = (efficiency[FIRE]/ MAX_VEHICLE_EFFICIENCY) × crewRatio -->  (formule du sujet)
+     * liquidScore  = liquidType.efficiency(fireType)
+     * distanceScore = 1 / (1 + dist / dRef)   (hyperbole — jamais négatif car on veut privilégier les véhicules proches, mais on ne veut pas exclure les véhicules plus éloignés qui pourraient être les seuls compatibles pour ce feu)
+     * liquidRatio  = currentLiquid / liquidCapacity
+     * fuelRatio    = currentFuel   / fuelCapacity
      */
     private double vehicleScore(VehicleDto v, FireDto fire) {
-        // Récupère l'efficacité du liquide contre ce type de feu (entre 0.0 et 1.0), 0 si pas de liquide
-        double efficiency = (v.getLiquidType() != null)
-                ? v.getLiquidType().getEfficiency(fire.getType())
-                : 0.0;
+        // vehicleNorm : formule d'atténuation du sujet × ratio crew, normalisée sur [0, 1]
+        double crewRatio   = (v.getType() != null && v.getType().getVehicleCrewCapacity() > 0)
+                           ? (double) v.getCrewMember() / v.getType().getVehicleCrewCapacity()
+                           : 0.0;
+        double vehicleEff  = (v.getType() != null)
+                           ? v.getType().getEfficiencyMap().getOrDefault(EmergencyType.FIRE, 0f)
+                           : 0.0;
+        double vehicleNorm = (vehicleEff / MAX_VEHICLE_EFFICIENCY) * crewRatio; // normalisé sur [0, 1] grâce à la division par MAX_VEHICLE_EFFICIENCY (efficacité max possible dans l'enum VehicleType)
 
-        // pas sûr qu'il faille resonner en terme de RATIO ???
+        // liquidScore : efficacité du liquide sur le type de feu, ∈ [0, 1]
+        double liquidScore = (v.getLiquidType() != null)
+                           ? v.getLiquidType().getEfficiency(fire.getType())
+                           : 0.0;
 
-        // Récupère le ratio du liquide embarqué par rapport à la capacité du véhicule
+        // distanceScore : courbe hyperbole, ∈ (0, 1] — jamais négatif
+        double dist          = calcule_distance(v.getLat(), v.getLon(), fire.getLat(), fire.getLon());
+        double distanceScore = 1.0 / (1.0 + dist / dRef);
+
+        // liquidRatio : réservoir de liquide restant, ∈ [0, 1]
         double liquidRatio = (v.getLiquidType() != null && v.getType().getLiquidCapacity() > 0)
-                ? v.getLiquidQuantity()  / v.getType().getLiquidCapacity()
-                : 0.0;
-        // Récupère le ratio du carburant embarqué par rapport à la capacité du véhicule
-        double fuelRatio = (v.getType() != null && v.getType().getFuelCapacity() > 0)
-                ? v.getFuelQuantity()  / v.getType().getFuelCapacity()
-                : 0.0;
-        // Récupère la distance du véhicule au feu
-        double distVehicleFire = calcule_distance(v.getLat(), v.getLon(), fire.getLat(), fire.getLon());
+                           ? v.getLiquidQuantity() / v.getType().getLiquidCapacity()
+                           : 0.0;
 
-        // Score total = compatibilité liquide (priorité haute) + taille équipage + quantité de ressources restantes
-        // Le ×50 sur l'efficacité garantit qu'un véhicule compatible bat toujours un véhicule incompatible bien chargé
-        return efficiency * efficiencyWeight             // 0–50  (priorité absolue : liquide compatible ?)
-                //+ v.getCrewMember() * crewMemberWeight // INUTILE CAR TOUS LES VEHICULES SERONT PLEINS  // 0–40  (équipage 1–8 pompiers) // a mettre en ratio !!!
-                - distVehicleFire * distanceWeight       // 0–20  (carburant suffisant ?)
-                + liquidRatio * liquidWeight             // 0–20  (réservoir plein ?)
-                + fuelRatio * fuelWeight;                // 0–-45 (0.15° ≈ 16 km max à Lyon)
+        // fuelRatio : réservoir de carburant restant, ∈ [0, 1]
+        double fuelRatio   = (v.getType() != null && v.getType().getFuelCapacity() > 0)
+                           ? v.getFuelQuantity() / v.getType().getFuelCapacity()
+                           : 0.0;
+
+        return vehicleNorm   * wVehicle     // *0,40
+             + liquidScore   * wLiquid      // *0,30
+             + distanceScore * wDistance    // *0,20
+             + liquidRatio   * wLiquidRatio // *0,07
+             + fuelRatio     * wFuel;       // *0,03
     }
 
 
@@ -260,9 +285,9 @@ public class FireService {
                 .filter(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId())) // on prend tout ceux en mission
                 .filter(v -> v.getType() != null && v.getType().getLiquidCapacity() > 0) // exclure ambulances pour le moment
                 .filter(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())) // on ne garde que les compatibles
-                .max(Comparator.comparingDouble((VehicleDto v) -> // on garde le plus compatible au liquide anti-feu ET on inclue la distance aussi
-                        v.getLiquidType().getEfficiency(fire.getType()) * efficiencyWeight
-                        - calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon()) * distanceWeight))
+                .max(Comparator.comparingDouble((VehicleDto v) -> // on garde le plus compatible au liquide anti-feu ET on inclue la distance à la caserne
+                        v.getLiquidType().getEfficiency(fire.getType()) * wLiquid
+                        + (1.0 / (1.0 + calcule_distance(v.getLat(), v.getLon(), caserne.getLat(), caserne.getLon()) / dRef)) * wDistance))
                 .ifPresent(v -> {
                     log.error("=== FEU CASERNE '{}' #{} — rappel forcé du véhicule {} ===", caserne.getName(), fire.getId(), v.getId());
                     // a la place de requestRecall, il faudrait pas plutot faire dispatch(v, fire) ???
@@ -318,6 +343,8 @@ public class FireService {
                 // .thenComparingInt((FireDto f) -> (f.getInjuredPeopleDtoList() == null || f.getInjuredPeopleDtoList().isEmpty()) ? 0 : 1)
                 .toList(); // on collecte dans une liste triée pour pouvoir la réutiliser plusieurs fois dans la boucle de dispatch, sans refaire le tri à chaque fois
 
+        Set<Integer> nowUncovered = new HashSet<>(); // feux sans véhicule disponible ce tick
+
         for (FireDto fire : sortedFires) {
             if (emergencyManagerService.getAssignedFires().contains(fire.getId())) continue; // un véhicule est déjà en route → on passe
 
@@ -331,37 +358,54 @@ public class FireService {
             }
 
             // Tier 2 : aucun véhicule "prêt" → envoie le moins mauvais disponible au-dessus des seuils minimaux
-            candidates(vehicles, fire)
-                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)))
-                    .ifPresent(
-                            vehicle -> {
-                                log.warn("Feu #{} — aucun véhicule prêt complètement (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
-                                        fire.getId(), readyFuel, readyLiquid,
-                                        vehicle.getId(), vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
-                                emergencyManagerService.dispatch(vehicle, fire);
-                            }
+            Optional<VehicleDto> fallback = candidates(vehicles, fire)
+                    .max(Comparator.comparingDouble(v -> vehicleScore(v, fire)));
 
-//                        // IDENTIFIER LA RAISON DE PK ON NE PEUT PAS TRAITER CE FEU !!!
-//                            () -> {
-//                        boolean allBusy = vehicles.stream().allMatch(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId()));
-//                        boolean incompatible = vehicles.stream()
-//                                .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
-//                                .noneMatch(v -> isLiquidCompatible(v.getLiquidType(), fire.getType()));
-//                        if (allBusy)
-//                            log.warn("Feu #{} (type={}) — tous les véhicules sont occupés", fire.getId(), fire.getType());
-//                        else if (incompatible)
-//                            log.warn("Feu #{} (type={}) — aucun véhicule avec liquide compatible", fire.getId(), fire.getType());
-//                        else
-//                            log.warn("Feu #{} (type={}) — tous les véhicules compatibles sont sous le seuil minimum", fire.getId(), fire.getType());
-//                    }
-                    );
+            if (fallback.isPresent()) {
+                VehicleDto vehicle = fallback.get();
+                log.warn("Feu #{} — aucun véhicule prêt complètement (fuel≥{}/liq≥{}), dispatch avec ressources partielles : véhicule {} (fuel={}, liq={})",
+                        fire.getId(), readyFuel, readyLiquid,
+                        vehicle.getId(), vehicle.getFuelQuantity(), vehicle.getLiquidQuantity());
+                emergencyManagerService.dispatch(vehicle, fire);
+
+
+            // ----------------------------------------------------------
+            } else { // JUSTE DES LOGS
+                // Feu non couvert — diagnostic loggué uniquement si l'état change (pas de spam à chaque tick)
+                nowUncovered.add(fire.getId()); // ce feu est non couvert ce tick
+                if (!uncoveredFireIds.contains(fire.getId())) {  // ce feu était couvert au tick précédent, il vient de devenir non couvert → on loggue un avertissement de diagnostic
+                    boolean allBusy = vehicles.stream()
+                            .allMatch(v -> emergencyManagerService.getVehicleStates().containsKey(v.getId())); // tous les véhicules sont en mission (aucun n'est disponible pour ce feu)
+                    boolean incompatible = !allBusy && vehicles.stream()
+                            .filter(v -> !emergencyManagerService.getVehicleStates().containsKey(v.getId()))
+                            .noneMatch(v -> isLiquidCompatible(v.getLiquidType(), fire.getType())); // aucun véhicule libre n'est compatible avec ce type de feu
+                    if (allBusy)
+                        log.warn("Feu #{} (type={}) — non couvert : tous les véhicules sont en mission", fire.getId(), fire.getType());
+                    else if (incompatible)
+                        log.warn("Feu #{} (type={}) — non couvert : aucun véhicule avec liquide compatible", fire.getId(), fire.getType());
+                    else
+                        log.warn("Feu #{} (type={}) — non couvert : tous les véhicules compatibles déjà en mission OU sous le seuil (fuel<{}/liq<{})", fire.getId(), fire.getType(), readyFuel, readyLiquid);
+                }
+            }
         }
 
-        // Mémorise l'intensité de chaque feu actif pour le prochain tick --> SnapShot
+        // Log les feux qui viennent d'être couverts (étaient non couverts au tick précédent)
+        uncoveredFireIds.stream()
+                .filter(id -> !nowUncovered.contains(id)) // ce feu était non couvert au tick précédent, il vient d'être couvert → on loggue une info de diagnostic
+                .forEach(id -> log.info("Feu #{} — maintenant couvert ou éteint", id));
+        uncoveredFireIds.retainAll(nowUncovered); // met à jour la liste des feux non couverts pour le prochain tick : on garde uniquement les feux qui sont encore non couverts ce tick (on retire les feux qui viennent d'être couverts)
+        uncoveredFireIds.addAll(nowUncovered); //  puis on ajoute les nouveaux feux non couverts de ce tick
+
+
+
+        // -----------------------------------------------------------------------------
+
+        // Snapshot des intensités pour la détection d'extinction par d'autres équipes
         fires.forEach(f -> lastKnownIntensity.put(f.getId(), f.getIntensity()));
-        // Nettoie les feux qui n'existent plus (éteints ou disparus de la liste)
-        Set<Integer> activeIds = fires.stream().map(FireDto::getId).collect(Collectors.toSet()); // feux encore actifs
-        lastKnownIntensity.keySet().removeIf(id -> !activeIds.contains(id)); // enleve si plus dans liste des feux actifs
+        // Nettoie les feux éteints/disparus des deux maps
+        Set<Integer> activeIds = fires.stream().map(FireDto::getId).collect(Collectors.toSet());
+        lastKnownIntensity.keySet().removeIf(id -> !activeIds.contains(id));
+        uncoveredFireIds.removeIf(id -> !activeIds.contains(id));
 
     }
 

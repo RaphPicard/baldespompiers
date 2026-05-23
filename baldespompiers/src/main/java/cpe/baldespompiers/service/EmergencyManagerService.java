@@ -77,8 +77,7 @@ public class EmergencyManagerService {
     public void dispatchAllFires(List<FireDto> fires, List<VehicleDto> vehicles) {
         if (recallMode.get()) { log.debug("dispatchAll skip (mode rappel)"); return; } // guard pour le bouton de rappel global
         fireService.dispatchFires(fires, vehicles); // ca va FILTRER et TRIER les feux PUIS appeler dispatch d'en dessous
-        // dispatchAllFires va appeler dispatch qui va assigner les vehiclesStates et après repositionIdleVehicle pourra les chek
-        if (fires != null && !fires.isEmpty()) repositionIdleVehicles(vehicles); // les vehicules inactifs vont renter se charger au MAX et se postionner aux centroidess
+        // repositionIdleVehicles appelé depuis dispatchAllEvents (après) pour éviter des OSRM inutiles (Open Source Routing Machine)
     }
 
     // |
@@ -127,6 +126,7 @@ public class EmergencyManagerService {
     public void dispatchAllEvents(List<EmergencyEventDto> events, List<VehicleDto> vehicles) {
         if (recallMode.get()) return; // guard pour le bouton de rappel global
         rpEventService.dispatchEvents(events, vehicles); // ca va FILTRER et TRIER les events PUIS appeler dispatchEvent d'en dessous
+        repositionIdleVehicles(vehicles); // après feux + events, reposition les véhicules inactifs restants
     }
     
     // |

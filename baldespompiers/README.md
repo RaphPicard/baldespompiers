@@ -295,6 +295,9 @@ cpefighter/
 - **FAIT** : correction position de départ stale dans `moveVehicle` et `moveVehicleToEvent` — au lancement du thread async, le `VehicleDto` du poller peut avoir une position obsolète (véhicule vient de rentrer à la caserne mais le poller n’a pas encore rafraîchi) ; ajout d’un refetch `vehicleClient.getVehicleById` en tout début de méthode pour que la première route OSRM parte de la vraie position courante
 
 # @TODO :
+- FRONT : Une interface simple permettant d’afficher / masquer les feux selon leur type, leur intensité, leur étendue, leur nombre de blessés, etc.
+- FRONT : Une interface simple permettant d’afficher / masquer les véhicules selon leur type, le type de liquide, leur niveau de carburant, etc.
+
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
 - Changement de liquide automatiquement à la caserne si un véhicule n’a pas de feu de son type de liquide à eteindre, pour éviter qu’il attente à la caserne alors qu’il pourrait être utile sur un feu d’un autre type (ex : un véhicule à eau qui attend alors qu’il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
@@ -304,3 +307,4 @@ cpefighter/
 - Seuils d’abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
 - Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d’un camion avec le bon anti-feu
 - ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée
+-  OPTIONNEL : La gestion de la fatigue : on peut envisager qu’un pompier doive rester inactif pendant un certain temps avant de pouvoir repartir en mission ;

@@ -40,6 +40,22 @@ public class RPEventService {
     @Value("${dispatch.abandon.threshold:4.0}")
     private float abandonThreshold;
 
+    // Poids réutilisés depuis les propriétés fire — liquid absent pour les events
+    @Value("${dispatch.w-vehicle:0.40}")
+    private double wVehicle;
+
+    @Value("${dispatch.w-distance:0.20}")
+    private double wDistance;
+
+    @Value("${dispatch.w-fuel:0.03}")
+    private double wFuel;
+
+    @Value("${dispatch.d-ref:0.018}")
+    private double dRef;
+
+    // Max de l'enum pour les events non-feu (EMERGENCY_AMBULANCE = 20f sur ROAD/INJURY/MISC)
+    private static final double MAX_EVENT_EFFICIENCY = 20.0;
+
     public RPEventService(@Lazy EmergencyManagerService emergencyManagerService,
                           FacilityClient facilityClient) {
         this.emergencyManagerService = emergencyManagerService;
@@ -66,16 +82,34 @@ public class RPEventService {
     }
 
     // ── Score d'aptitude pour un event ────────────────────────────────────────
+
+    /**
+     * Score normalisé [0, ~0.63] d'un véhicule pour un event donné.
+     * Pas de composante liquide (irrelevant pour les events non-feu).
+     *
+     * vehicleNorm  = efficiency[eventType] × crewRatio / MAX_EVENT_EFFICIENCY
+     * distanceScore = 1 / (1 + dist / dRef)   (hyperbole — jamais négatif)
+     * fuelRatio    = currentFuel / fuelCapacity
+     */
     private double eventScore(VehicleDto v, EmergencyEventDto event) {
-        float efficiency = v.getType() != null && event.getEventType() != null
-                ? v.getType().getEfficiencyMap().getOrDefault(event.getEventType(), 0f)
-                : 0f;
-        double dist = distance(v.getLon(), v.getLat(),
-                event.getLon(), event.getLat());
-        // l'efficacité est le facteur le plus important, mais on pénalise aussi la distance (carburant consommé et temps de trajet) et on valorise un peu le carburant restant (car il peut servir pour d'autres events ensuite)
-        return efficiency * 50.0
-                - dist * 300.0
-                + v.getFuelQuantity() * 0.1;
+        double crewRatio   = (v.getType() != null && v.getType().getVehicleCrewCapacity() > 0)
+                           ? (double) v.getCrewMember() / v.getType().getVehicleCrewCapacity()
+                           : 0.0;
+        double vehicleEff  = (v.getType() != null && event.getEventType() != null)
+                           ? v.getType().getEfficiencyMap().getOrDefault(event.getEventType(), 0f)
+                           : 0.0;
+        double vehicleNorm = vehicleEff * crewRatio / MAX_EVENT_EFFICIENCY;
+
+        double dist          = distance(v.getLon(), v.getLat(), event.getLon(), event.getLat());
+        double distanceScore = 1.0 / (1.0 + dist / dRef);
+
+        double fuelRatio   = (v.getType() != null && v.getType().getFuelCapacity() > 0)
+                           ? v.getFuelQuantity() / v.getType().getFuelCapacity()
+                           : 0.0;
+
+        return vehicleNorm   * wVehicle
+             + distanceScore * wDistance
+             + fuelRatio     * wFuel;
     }
 
     // ── Filtre : véhicules compatibles disponibles ────────────────────────────
@@ -117,10 +151,10 @@ public class RPEventService {
         }
     }
 
-    private double distance(double lon1, double lat1, double lon2, double lat2) {
+    private static double distance(double lon1, double lat1, double lon2, double lat2) {
         double dx = lon1 - lon2;
         double dy = lat1 - lat2;
-        return Math.sqrt(dx * dx + dy * dy);
+        return Math.sqrt(dx * dx + dy * dy); // en degrés — cohérent avec dRef (aussi en degrés)
     }
 
     // ── Méthodes miroir de FireService (pour la redirection en route) ──────────

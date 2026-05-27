@@ -108,6 +108,14 @@ public class FireService {
     @Value("${dispatch.d-ref:0.018}")
     private double dRef;
 
+    // Taille d'un pas de déplacement en degrés — sert à convertir une distance en nombre de waypoints
+    // Un véhicule à moins de dispatch.nearby-waypoints waypoints du feu n'est pas déprioritisé même si une autre équipe l'éteint déjà
+    @Value("${movement.step.size:0.0005}")
+    private double stepSize;
+
+    @Value("${dispatch.nearby-waypoints:100}")
+    private int nearbyWaypoints;
+
     // Efficacité max possible dans l'enum VehicleType (TRUCK.FIRE = 50f)
     private static final double MAX_VEHICLE_EFFICIENCY = 50.0;
 
@@ -315,13 +323,20 @@ public class FireService {
                     if (caserne != null) handleCasernefire(f, caserne, vehicles);
                 });
 
-        // Détecte les feux dont l'intensité baisse depuis le dernier tick : une autre équipe s'en occupe déjà
+        // Détecte les feux dont l'intensité baisse depuis le dernier tick : une autre équipe s'en occupe déjà, le temps qu'on arrive ...
+        double nearbyThresholdDeg = stepSize * nearbyWaypoints; // seuil en degrés en dessous duquel un véhicule est considéré "proche" du feu
         Set<Integer> beingExtinguishedByOtherTeam = fires.stream()
                 .filter(f -> !emergencyManagerService.getAssignedFires().contains(f.getId())) // pas encore assigné à notre equipe
                 .filter(f -> {
                     Float prev = lastKnownIntensity.get(f.getId());
                     return prev != null && f.getIntensity() < prev; // intensité en baisse → quelqu'un d'autre l'éteint
                 })
+                // Ne déprioritise pas si un véhicule candidat est déjà à moins de nearbyWaypoints pas du feu
+                // (il serait dommage de laisser passer un feu presque arrivé juste parce qu'une autre équipe commence à peine à l'éteindre)
+                .filter(f -> candidates(vehicles, f)
+                        .mapToDouble(v -> calcule_distance(v.getLat(), v.getLon(), f.getLat(), f.getLon()))
+                        .min()
+                        .orElse(Double.MAX_VALUE) >= nearbyThresholdDeg)
                 .map(FireDto::getId) // on garde juste les IDs pour le tri, pas besoin de garder les objets complets
                 .collect(Collectors.toSet()); // les feux en cours d'extinction par d'autres équipes seront traités en dernier, après tous les autres feux (même les feux faibles ou sans blessés), pour ne pas gaspiller nos ressources sur des feux que d'autres équipes sont déjà en train de gérer efficacement
 
@@ -338,8 +353,15 @@ public class FireService {
                 // 1. Feux avec peu de véhicules compatibles en premier (véhicules "rares" réservés)
                 .thenComparingInt((FireDto f) -> (int) candidates(vehicles, f).count())
                 // 2. À égalité de compatibilité, les plus intenses d'abord
-                .thenComparingDouble(f -> -f.getIntensity())) // -f pour un tri décroissant car comparingDouble trie du plus petit au plus grand, on met un signe moins pour inverser l'ordre et traiter les feux les plus intenses en premier à égalité de compatibilité
-                // 3. Feux sans blessés en premier (libère les véhicules plus vite pour les feux complexes)
+                .thenComparingDouble(f -> -f.getIntensity()) // -f pour un tri décroissant car comparingDouble trie du plus petit au plus grand, on met un signe moins pour inverser l'ordre et traiter les feux les plus intenses en premier à égalité de compatibilité
+                // 3. À égalité d'intensité, favorise le feu avec le meilleur vehicleScore max disponible
+                //    (= le feu le plus proche/compatible du meilleur véhicule libre) — évite qu'un feu
+                //    lointain mais intense vole le véhicule d'un feu proche équivalent
+                .thenComparingDouble((FireDto f) -> -candidates(vehicles, f) // -candidates pour un tri décroissant des scores !!!!
+                        .mapToDouble(v -> vehicleScore(v, f))
+                        .max()
+                        .orElse(0.0)))
+                // 4. Feux sans blessés en premier (libère les véhicules plus vite pour les feux complexes)
                 // .thenComparingInt((FireDto f) -> (f.getInjuredPeopleDtoList() == null || f.getInjuredPeopleDtoList().isEmpty()) ? 0 : 1)
                 .toList(); // on collecte dans une liste triée pour pouvoir la réutiliser plusieurs fois dans la boucle de dispatch, sans refaire le tri à chaque fois
 

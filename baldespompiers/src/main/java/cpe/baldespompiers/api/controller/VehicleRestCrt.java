@@ -2,6 +2,7 @@ package cpe.baldespompiers.api.controller;
 
 import cpe.baldespompiers.client.VehicleClient;
 import cpe.baldespompiers.model.dto.Coord;
+import cpe.baldespompiers.model.dto.EmergencyEventDto;
 import cpe.baldespompiers.model.dto.FireDto;
 import cpe.baldespompiers.model.dto.VehicleDto;
 import cpe.baldespompiers.service.EmergencyManagerService;
@@ -9,6 +10,7 @@ import cpe.baldespompiers.service.VehicleService;
 import cpe.baldespompiers.thread.EventPollerThread;
 import cpe.baldespompiers.thread.VehicleMovementThread;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -22,7 +24,7 @@ public class VehicleRestCrt {
     private final VehicleClient vehicleClient;
     private final VehicleMovementThread vehicleMovementThread;
     private final EmergencyManagerService emergencyManagerService;
-    private final EventPollerThread poller;
+    private final EventPollerThread eventPollerThread;
 
     @Value("${simulator.team-uuid:}")
     private String team_uuid;
@@ -30,12 +32,13 @@ public class VehicleRestCrt {
     public VehicleRestCrt(VehicleService vehicleService,
                           VehicleClient vehicleClient,
                           VehicleMovementThread vehicleMovementThread,
-                          EmergencyManagerService emergencyManagerService, EventPollerThread poller) {
+                          EmergencyManagerService emergencyManagerService,
+                          EventPollerThread eventPollerThread) {
         this.vehicleService = vehicleService;
         this.vehicleClient = vehicleClient;
         this.vehicleMovementThread = vehicleMovementThread;
         this.emergencyManagerService = emergencyManagerService;
-        this.poller = poller;
+        this.eventPollerThread = eventPollerThread;
     }
 
     @GetMapping
@@ -120,9 +123,40 @@ public class VehicleRestCrt {
         return Map.of("recalled", false);
     }
 
-    /** Retourne les véhicules actifs depuis le cache du poller */
-    @GetMapping
-    public List<FireDto> getAllFires() {
-        return poller.getCachedVehicles();
+    /** Dispatch manuel d'un véhicule vers un feu (depuis la carte). Force la réassignation. */
+    @PostMapping("/{vehicleId}/dispatch-fire/{fireId}")
+    public ResponseEntity<Map<String, Object>> dispatchFire(@PathVariable Integer vehicleId,
+                                                            @PathVariable Integer fireId) {
+        VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
+        FireDto fire = eventPollerThread.getCachedFires().stream()
+                .filter(f -> f.getId().equals(fireId)).findFirst().orElse(null);
+        if (vehicle == null || fire == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "ok", false,
+                    "error", vehicle == null ? "vehicle not found" : "fire not found"
+            ));
+        }
+        // Annule un éventuel flag de recall pour ne pas que la nouvelle mission soit interrompue
+        emergencyManagerService.clearRecallRequest(vehicleId);
+        emergencyManagerService.dispatch(vehicle, fire);
+        return ResponseEntity.ok(Map.of("ok", true, "vehicleId", vehicleId, "fireId", fireId));
+    }
+
+    /** Dispatch manuel d'un véhicule vers un événement (accident / blessé / divers). Force la réassignation. */
+    @PostMapping("/{vehicleId}/dispatch-event/{eventId}")
+    public ResponseEntity<Map<String, Object>> dispatchEvent(@PathVariable Integer vehicleId,
+                                                             @PathVariable Integer eventId) {
+        VehicleDto vehicle = vehicleClient.getVehicleById(String.valueOf(vehicleId));
+        EmergencyEventDto event = eventPollerThread.getCachedEvents().stream()
+                .filter(e -> e.getId().equals(eventId)).findFirst().orElse(null);
+        if (vehicle == null || event == null) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "ok", false,
+                    "error", vehicle == null ? "vehicle not found" : "event not found"
+            ));
+        }
+        emergencyManagerService.clearRecallRequest(vehicleId);
+        emergencyManagerService.dispatchEvent(vehicle, event);
+        return ResponseEntity.ok(Map.of("ok", true, "vehicleId", vehicleId, "eventId", eventId));
     }
 }

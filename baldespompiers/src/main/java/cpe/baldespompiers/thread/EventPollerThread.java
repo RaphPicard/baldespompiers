@@ -109,7 +109,6 @@ public class EventPollerThread {
                     if (remaining > 0) log.info("{} blessé(s) restants à traiter", remaining);
                     lastEventRemaining = remaining;
                 }
-                emergencyManagerService.dispatchAllEvents(allEvents, vehicles);
             } else {
                 if (lastEventCount != 0) {
                     log.info("Aucun event actif.");
@@ -117,6 +116,8 @@ public class EventPollerThread {
                 }
                 lastEventRemaining = 0;
             }
+            // Toujours appelé (même liste vide) — contient repositionIdleVehicles après feux + events
+            emergencyManagerService.dispatchAllEvents(allEvents, vehicles);
 
         } catch (Exception e) {
             log.error("Erreur polling : {}", e.getMessage());

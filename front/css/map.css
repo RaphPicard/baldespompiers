@@ -113,6 +113,95 @@ body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-
   transform: scale(1.1);
 }
 
+/* ── Panneau liste des feux ─────────────────────────────── */
+.fires-list-panel {
+  top: 110px;
+  right: 16px;
+  width: 240px;
+  max-height: calc(100vh - 180px);
+  display: flex;
+  flex-direction: column;
+}
+.fires-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  margin-bottom: 8px;
+}
+.fires-list-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  flex: 1;
+}
+.fires-list-badge {
+  background: #dc2626;
+  color: white;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+.fires-list-chevron {
+  font-size: 10px;
+  color: #94a3b8;
+  transition: transform 0.2s ease;
+}
+.fires-list-panel.collapsed .fires-list-chevron { transform: rotate(180deg); }
+.fires-list-panel.collapsed #fires-list-body { display: none; }
+#fires-list-body {
+  overflow-y: auto;
+  max-height: calc(100vh - 300px);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.fires-list-empty {
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 10px 0;
+}
+.fire-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.12s ease;
+  font-size: 12px;
+}
+.fire-list-item:hover {
+  filter: brightness(0.96);
+  transform: translateX(2px);
+}
+.fire-list-id {
+  font-weight: 700;
+  font-size: 12px;
+  min-width: 36px;
+}
+.fire-list-info {
+  flex: 1;
+  color: #475569;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fire-list-intensity {
+  font-weight: 700;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 /* Leaflet controls custom */
 .leaflet-control-zoom {
   border: none !important;

@@ -73,7 +73,10 @@
 
       <div class="flex flex-col gap-4">
         <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
-          Type
+          <div class="flex justify-between items-baseline">
+            <span>Type</span>
+            <span id="space-hint" class="text-xs font-normal text-slate-500">— places</span>
+          </div>
           <select id="type" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition">
             <option>CAR</option>
             <option>FIRE_ENGINE</option>
@@ -98,8 +101,11 @@
         </label>
 
         <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">
-          Équipage
-          <input id="crewMember" type="number" value="4" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition"/>
+          <div class="flex justify-between items-baseline">
+            <span>Équipage</span>
+            <span id="crew-max-hint" class="text-xs font-normal text-slate-500">max : —</span>
+          </div>
+          <input id="crewMember" type="number" min="0" class="border border-slate-300 rounded-lg p-2.5 text-sm font-normal bg-slate-50 focus:bg-white focus:ring-2 focus:ring-orange-400 focus:border-orange-400 outline-none transition"/>
         </label>
 
         <label class="flex flex-col gap-1.5 text-sm font-semibold text-slate-700">

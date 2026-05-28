@@ -45,12 +45,12 @@ La gestion de projet a reposé sur :
 
 L'estimation ci-dessous se base sur l'analyse des commits (60 commits effectifs hors merges pour Raphaël, 16 pour Léonard, 14 pour Evan, 8 pour Lissandre), la taille et la complexité des contributions de chacun, et la nature des fonctionnalités portées.
 
-| Membre     | Investissement estimé | Contributions principales                                                                                                                                                             |
-|------------|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Raphaël P. | 25 %                  | `EmergencyManagerService`, `FireService`, stratégie de dispatch multi-critères, scoring normalisé, multi-casernes, repositionnement centroïde, chaînage feu→feu, corrections majeures |
-| Léonard    | 25 %                  | `RPEventService` (accidents / blessés), gestion des types de liquide, `EventPollerThread`, corrections de threads                                                                     |
-| Evan       | 25 %                  | Architecture globale, Frontend Leaflet (`map.js`, `vehicles.js`, CSS/HTML/JS), déplacement initial des véhicules, ajout d'icônes et animations, retour forcé (global + par véhicule)  |
-| Lissandre  | 25 %                  | 3 modes de déplacement, Intégration OSRM (waypoints complets), vérification carburant aller-retour, `GisTools.hasFuelToReach`                                                         |
+| Membre     | Investissement estimé | Contributions principales                                                                                                                                                                                                     |
+|------------|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Raphaël P. | 25 %                  | `EmergencyManagerService`, `FireService`, stratégie de dispatch multi-critères, scoring normalisé, multi-casernes, repositionnement centroïde, chaînage feu→feu, corrections majeures                                         |
+| Léonard    | 25 %                  | `RPEventService` (accidents / blessés), gestion des types de liquide, `EventPollerThread`, corrections de threads                                                                                                             |
+| Evan       | 25 %                  | Architecture globale, Frontend Leaflet (`map.js`, `vehicles.js`, CSS/HTML/JS), déplacement initial des véhicules, ajout d'icônes et animations, retour forcé (global + par véhicule), pilotage manuel des véhicues via la map |
+| Lissandre  | 25 %                  | 3 modes de déplacement, Intégration OSRM (waypoints complets), vérification carburant aller-retour, `GisTools.hasFuelToReach`                                                                                                 |
 
 ---
 

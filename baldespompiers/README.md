@@ -129,9 +129,5 @@ baldespompiers/
 # @TODO
 
 - FRONT : filtres feux (type, intensité, étendue, blessés) et filtres véhicules (type, liquide, carburant)
-- Changement de liquide automatique à la caserne si aucun feu du bon type n'est actif
 - Seuils d'abandon, de recharge et de dispatch à revoir en ratio (pour adapter chaque type de véhicule)
-- Si toutes les ambulances sont occupées, un fire engine (par ex CARBON_DIOXYDE ) peut aller sur un road accident ??? — sous-optimal si un feu électrique spawn dans la foulée (faudrait pouvoir l'interrompre)
-- Revoir la répartition initiale des véhicules par caserne
-
 - OPTIONNEL : gestion de la fatigue (pompier doit rester inactif un certain temps avant de repartir)

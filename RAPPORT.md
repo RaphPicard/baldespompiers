@@ -49,8 +49,8 @@ L'estimation ci-dessous se base sur l'analyse des commits (60 commits effectifs 
 |------------|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Raphaël P. | 25 %                  | `EmergencyManagerService`, `FireService`, stratégie de dispatch multi-critères, scoring normalisé, multi-casernes, repositionnement centroïde, chaînage feu→feu, corrections majeures |
 | Léonard    | 25 %                  | `RPEventService` (accidents / blessés), gestion des types de liquide, `EventPollerThread`, corrections de threads                                                                     |
-| Evan       | 25 %                  | Architecture globale, Frontend Leaflet (`map.js`, `vehicles.js`, CSS/HTML/JS), déplacement initial des véhicules, ajout d'icônes et animations                                        |
-| Lissandre  | 25 %                  | Intégration OSRM (waypoints complets), vérification carburant aller-retour, `GisTools.hasFuelToReach`                                                                                 |
+| Evan       | 25 %                  | Architecture globale, Frontend Leaflet (`map.js`, `vehicles.js`, CSS/HTML/JS), déplacement initial des véhicules, ajout d'icônes et animations, retour forcé (global + par véhicule)  |
+| Lissandre  | 25 %                  | 3 modes de déplacement, Intégration OSRM (waypoints complets), vérification carburant aller-retour, `GisTools.hasFuelToReach`                                                         |
 
 ---
 

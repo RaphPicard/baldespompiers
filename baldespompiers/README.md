@@ -270,6 +270,7 @@ cpefighter/
     - Seuils configurables dans `application.properties`
 - **FAIT** : vitesse max prise en compte pour le déplacement — `computeStepDelay` calcule le délai entre chaque pas proportionnellement à `VehicleType.getMaxSpeed()` (référence 110 km/h)
 - **FAIT** : véhicule rentre/recharge à la caserne uniquement si nécessaire — `vehicleNeedsRecharge` vérifie fuel < minFuel ou liquid < minLiquid ; `waitForRecharge` attend les seuils `readyFuel`/`readyLiquid` avant de libérer le véhicule
+- **FAIT** : retour à la caserne la plus proche après mission — `nearestFacility()` dans `VehicleMovementThread` interroge toutes nos casernes et sélectionne la plus proche ; `returnToFacility` et `waitForRecharge` acceptent désormais une `FacilityDto` cible optionnelle ; rappel forcé (feu sur caserne, bouton recall) → caserne d’origine conservée (`null`)
 - **FAIT** : si le véhicule n'arrive pas au feu par la route (feu en zone inaccessible…), fallback automatique en ligne droite — les 3 cas d'échec OSRM (HTTP error, code invalide, pas de coordonnées) tombent sur `moveToPoint` ; le tronçon final hors-route est aussi parcouru en ligne droite
 - **FAIT** : support multi-casernes dans `FireService` — `knownFacilities` remplace les scalaires `caserneLon`/`caserneLat` ; `ensureFacilityList()` charge toutes les casernes ; `caserneOnFire()` détecte un feu sur n'importe laquelle ; `handleCasernefire()` rappelle le véhicule le plus proche de LA caserne concernée (et non d'une caserne unique hardcodée)
 - **FAIT** : rappel global (`recall-all`) rapatrie aussi les véhicules inactifs — `recallIdleVehicle()` dans `VehicleMovementThread` envoie chaque véhicule sans thread actif vers sa caserne (`facilityRefID`) ; s'annule proprement si le rappel est désactivé en cours de route
@@ -302,11 +303,8 @@ cpefighter/
 - Faire les 3 configs (il en manque 1 : SecurityConfig.java)
 - FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
 - Changement de liquide automatiquement à la caserne si un véhicule n’a pas de feu de son type de liquide à eteindre, pour éviter qu’il attente à la caserne alors qu’il pourrait être utile sur un feu d’un autre type (ex : un véhicule à eau qui attend alors qu’il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
-- Optimiser le retour à la caserne la plus proche (et pas forcément la caserne d’origine)
-- Calculer combien de liquid et de fuel il faut pour eteindre x feu, et calculer minFuel et minLiquid en fonction de la distance au feu et de l’intensité du feu (pour éviter les retours à la caserne inutiles)
 - Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s’il doit faire le plein avant de partir ou pas
 - Seuils d’abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
-- Rappel forcé si feu caserne → rappelle parfois une ambulance au lieu d’un camion avec le bon anti-feu
 - ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée (donc pourquoi pas pour pas qu'il fasse rien MAIS il faudrait lever une exception dans ce cas pour forcer le fire engine à abandonner l’accident et aller sur le feu électrique dès que ce dernier spawn)
 - Les accidents sont vraiment bien gérés ?
 - Revoir repartition des vehicules ???

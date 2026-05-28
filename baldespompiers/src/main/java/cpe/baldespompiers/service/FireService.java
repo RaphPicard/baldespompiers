@@ -64,10 +64,10 @@ public class FireService {
     private int abandonIntensity;
 
     // Seuil absolu : en dessous, le véhicule est exclu du dispatch
-    @Value("${dispatch.min.fuel:10.0}")
+    @Value("${dispatch.min.fuel:20.0}")
     private float minFuel;
 
-    @Value("${dispatch.min.liquid:10.0}")
+    @Value("${dispatch.min.liquid:20.0}")
     private float minLiquid;
 
     @Value("${dispatch.min.crew:1}")
@@ -173,8 +173,8 @@ public class FireService {
                            : 0.0;
 
         // distanceScore : courbe hyperbole, ∈ (0, 1] — jamais négatif
-        double dist          = calcule_distance(v.getLat(), v.getLon(), fire.getLat(), fire.getLon());
-        double distanceScore = 1.0 / (1.0 + dist / dRef);
+        double dist          = calcule_distance(v.getLat(), v.getLon(), fire.getLat(), fire.getLon()); // retourne une distance en degrés, cohérente avec dRef qui est aussi en degréss
+        double distanceScore = 1.0 / (1.0 + dist / dRef); // hyperbole pour toujours positive et ne vaut jamais 0 (multiplication des scores...)
 
         // liquidRatio : réservoir de liquide restant, ∈ [0, 1]
         double liquidRatio = (v.getLiquidType() != null && v.getType().getLiquidCapacity() > 0)
@@ -186,6 +186,7 @@ public class FireService {
                            ? v.getFuelQuantity() / v.getType().getFuelCapacity()
                            : 0.0;
 
+        //pour que les coeffs est un sens tout doit etre dans le meme espace (normalisé)
         return vehicleNorm   * wVehicle     // *0,40
              + liquidScore   * wLiquid      // *0,30
              + distanceScore * wDistance    // *0,20

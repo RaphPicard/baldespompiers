@@ -190,9 +190,10 @@ Fonctionnalités avancées également intégrées :
 - repositionnement automatique au centroïde des feux actifs après charge complète si pas de feux compatibles, 
 - chaînage direct feu→feu sans retour caserne si ressources suffisantes, 
 - rappel d'urgence en cas de feu sur caserne si aucun véhicule disponible, 
-- gestion multi-casernes, 
+- gestion multi-casernes (recharge dans la caserne la plus proche, feu caserne détecté comme prioritaire...)
 - Stratégie de laisser les feux à une certaine faible intensité pour faire perdre du temps aux autres équipes ("seuil remis à 0"),
-- vérification de la suffisance du carburant aller-retour avant de partir.
+- vérification de la suffisance du carburant aller-retour avant de partir,
+- Un magnifique frontend Leaflet avec des icônes personnalisées, des tracés de trajets, une liste des feux avec détails, et un rafraîchissement toutes les 120 ms pour une réactivité optimale.
 
 ---
 

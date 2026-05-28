@@ -32,15 +32,15 @@ score event = efficiency[EVENT] × (vitesse / 110)
 
 ### Scores calculés
 
-| Véhicule | Score feu | Score event | Score total (50/50) | Score/crew |
-|---|---|---|---|---|
-| CAR (x₁) | 1.36 | 5.00 | 3.18 | 1.59 |
-| FIRE_ENGINE (x₂) | 5.00 | 1.67 | 3.34 | 0.84 |
-| PUMPER_TRUCK (x₃) | 12.73 | 1.06 | 6.88 | 1.15 |
-| WATER_TENDERS (x₄) | 20.00 | 0 | 10.00 | 3.33 |
-| TURNTABLE (x₅) | 25.45 | 1.06 | 13.28 | 2.21 |
-| TRUCK (x₆) | 50.00 | 2.00 | 26.00 | 3.25 |
-| AMBULANCE (x₇) | 0 | 20.00 | 10.00 | **5.00 ★** |
+| Véhicule           | Score feu | Score event | Score total (50/50) | Score/crew  |
+|--------------------|-----------|-------------|---------------------|-------------|
+| CAR (x₁)           | 1.36      | 5.00        | 3.18                | 1.59        |
+| FIRE_ENGINE (x₂)   | 5.00      | 1.67        | 3.34                | 0.84        |
+| PUMPER_TRUCK (x₃)  | 12.73     | 1.06        | 6.88                | 1.15        |
+| WATER_TENDERS (x₄) | 20.00     | 0           | 10.00               | 3.33        |
+| TURNTABLE (x₅)     | 25.45     | 1.06        | 13.28               | 2.21        |
+| TRUCK (x₆)         | 50.00     | 2.00        | 26.00               | 3.25        |
+| AMBULANCE (x₇)     | 0         | 20.00       | 10.00               | **5.00 ★**  |
 
 > L'AMBULANCE domine largement avec un ratio score/crew de 5.0, grâce à une efficiency event de 20 pour seulement 2 crew.
 
@@ -155,11 +155,11 @@ Ratio feu/event   : 0.47
 
 ## 6. Comparaison finale
 
-| Composition | Places | Crew | z | Score feu | Score event | Ratio |
-|---|---|---|---|---|---|---|
-| Sans contrainte (8 CAR + 9 AMB) | 44/45 | 26/30 | 102.72 | 10.91 | 180.04 | 0.06 |
-| Intuitive (1 WT + 4 FE + 4 AMB + 1 CAR) | 44/45 | 29/30 | 66.54 | 41.36 | 85.00 | 0.49 |
-| **Optimale finale (2 CAR + 1 TRUCK + 5 AMB)** | **44/45** | **22/30** | **82.36** | **52.72** | **112.00** | **0.47** |
+| Composition                                   | Places    | Crew      | z         | Score feu | Score event | Ratio    |
+|-----------------------------------------------|-----------|-----------|-----------|-----------|-------------|----------|
+| Sans contrainte (8 CAR + 9 AMB)               | 44/45     | 26/30     | 102.72    | 10.91     | 180.04      | 0.06     |
+| Intuitive (1 WT + 4 FE + 4 AMB + 1 CAR)       | 44/45     | 29/30     | 66.54     | 41.36     | 85.00       | 0.49     |
+| **Optimale finale (2 CAR + 1 TRUCK + 5 AMB)** | **44/45** | **22/30** | **82.36** | **52.72** | **112.00**  | **0.47** |
 
 ---
 

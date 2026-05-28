@@ -504,7 +504,7 @@ public class VehicleMovementThread {
         float speed = type.getMaxSpeed();
         if (speed <= 0) return stepDelayMs; // vitesse invalide → délai par défaut
         // Plus le véhicule est rapide, plus le délai entre deux pas est court (rapport inversement proportionnel)
-        return (long) (stepDelayMs * 110.0 / speed);
+        return (long) (stepDelayMs * 80.0 / speed);
     }
 
     // ── Mode route (OSRM) ─────────────────────────────────────────────────────

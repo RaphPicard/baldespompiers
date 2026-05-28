@@ -20,6 +20,36 @@ const VEHICLE_SPACE_BY_TYPE = {
   CAR: 2, FIRE_ENGINE: 4, PUMPER_TRUCK: 10, WATER_TENDERS: 10,
   TURNTABLE_LADDER_TRUCK: 15, TRUCK: 20, EMERGENCY_AMBULANCE: 4,
 };
+// efficiencyMap de VehicleType.java : 0 = pas compatible
+const EFFICIENCY_BY_TYPE = {
+  CAR:                   { FIRE: 1,  ROAD_ACCIDENT: 1, PERSONAL_INJURY: 5, MISCELLANEOUS_OPERATION: 5 },
+  FIRE_ENGINE:           { FIRE: 5,  ROAD_ACCIDENT: 2, PERSONAL_INJURY: 1, MISCELLANEOUS_OPERATION: 2 },
+  PUMPER_TRUCK:          { FIRE: 20, ROAD_ACCIDENT: 2, PERSONAL_INJURY: 1, MISCELLANEOUS_OPERATION: 2 },
+  WATER_TENDERS:         { FIRE: 20, ROAD_ACCIDENT: 0, PERSONAL_INJURY: 0, MISCELLANEOUS_OPERATION: 0 },
+  TURNTABLE_LADDER_TRUCK:{ FIRE: 40, ROAD_ACCIDENT: 0, PERSONAL_INJURY: 0, MISCELLANEOUS_OPERATION: 5 },
+  TRUCK:                 { FIRE: 50, ROAD_ACCIDENT: 2, PERSONAL_INJURY: 2, MISCELLANEOUS_OPERATION: 2 },
+  EMERGENCY_AMBULANCE:   { FIRE: 0,  ROAD_ACCIDENT: 20, PERSONAL_INJURY: 20, MISCELLANEOUS_OPERATION: 20 },
+};
+function efficiencyOf(vehicleType, emergencyType) {
+  return (EFFICIENCY_BY_TYPE[vehicleType] || {})[emergencyType] || 0;
+}
+
+// Efficacité liquide ↔ type de feu (LiquidType.java fireEfficiencyMap)
+const LIQUID_FIRE_EFFICIENCY = {
+  ALL:            { A: 0.1, B: 0.1, C: 0.1, D: 0.1, E: 0.1 },
+  WATER:          { A: 0.8, B: 0.8, C: 0.0, D: 0.0, E: 0.0 },
+  POWDER:         { A: 0.6, B: 0.6, C: 1.0, D: 0.0, E: 0.0 },
+  SPECIAL_POWDER: { A: 0.0, B: 0.0, C: 0.0, D: 1.0, E: 0.0 },
+  CARBON_DIOXIDE: { A: 0.0, B: 0.7, C: 0.0, D: 0.0, E: 1.0 },
+  FOAM:           { A: 0.7, B: 1.0, C: 0.0, D: 0.0, E: 0.0 },
+};
+function fireClass(fireType) {
+  // FireType : A | B_Alcohol | B_Gasoline | B_Plastics | C_Flammable_Gases | D_Metals | E_Electric
+  return (fireType || 'A').charAt(0);
+}
+function liquidEfficiencyOf(liquidType, fireType) {
+  return (LIQUID_FIRE_EFFICIENCY[liquidType] || {})[fireClass(fireType)] || 0;
+}
 
 // Couleur unique violet/rose pour tous nos véhicules
 const VEHICLE_COLOR = '#c026d3'; // fuchsia-600
@@ -142,8 +172,107 @@ function firePopup(f) {
     <div class="pop-row"><span class="pop-label">Étendue</span><span class="pop-value">${f.range.toFixed(2)}</span></div>
     <div class="pop-row"><span class="pop-label">Blessés</span><span class="pop-value">${injured.length}</span></div>
     ${injuredPopupBlock(injured)}
+    ${assignVehicleBlockFire(f.type, f.id, f.lat, f.lon)}
   `;
 }
+
+function distanceKm(a, b) {
+  const dLat = (a.lat - b.lat) * 111;
+  const dLon = (a.lon - b.lon) * 111 * Math.cos(a.lat * Math.PI / 180);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+}
+
+function vehiclePickerRow(v, dist, effLabel, fn, targetId) {
+  return `
+    <div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:11px;">
+      <span style="font-weight:600;color:#0f172a;flex-shrink:0;">#${v.id}</span>
+      <span style="color:#475569;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${v.type}</span>
+      <span style="color:#64748b;font-size:10px;">${dist.toFixed(1)}km</span>
+      <span style="background:#fef3c7;color:#92400e;border-radius:4px;padding:1px 5px;font-weight:600;font-size:10px;">${effLabel}</span>
+      <button onclick="${fn}(${v.id}, ${targetId}, this)"
+        style="background:#c026d3;color:white;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">
+        →
+      </button>
+    </div>
+  `;
+}
+
+// Sélecteur pour FEU : liquide compatible OU ambulance (utile pour gérer les blessés sur place)
+function assignVehicleBlockFire(fireType, fireId, lat, lon) {
+  const compatible = vehiclesCache
+    .map(v => {
+      const isAmbu = v.type === 'EMERGENCY_AMBULANCE';
+      const eff = isAmbu ? 0 : liquidEfficiencyOf(v.liquidType, fireType);
+      return { v, eff, isAmbu, dist: distanceKm({ lat, lon }, { lat: v.lat, lon: v.lon }) };
+    })
+    .filter(x => x.isAmbu || x.eff > 0)
+    // Pompiers d'abord (triés par efficacité), ambulances ensuite (triées par distance)
+    .sort((a, b) => {
+      if (a.isAmbu !== b.isAmbu) return a.isAmbu ? 1 : -1;
+      if (!a.isAmbu) return b.eff - a.eff || a.dist - b.dist;
+      return a.dist - b.dist;
+    });
+
+  if (compatible.length === 0) {
+    return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);font-size:11px;color:#94a3b8;">Aucun véhicule compatible</div>`;
+  }
+  const items = compatible.slice(0, 10)
+    .map(({ v, eff, isAmbu, dist }) => {
+      const label = isAmbu ? '🚑' : `${v.liquidType} ×${eff.toFixed(1)}`;
+      return vehiclePickerRow(v, dist, label, 'assignVehicleToFire', fireId);
+    })
+    .join('');
+  return `
+    <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);">
+      <div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">Assigner un véhicule (${compatible.length})</div>
+      <div style="max-height:180px;overflow-y:auto;">${items}</div>
+    </div>
+  `;
+}
+
+// Sélecteur pour ÉVÉNEMENT : seules les ambulances sont éligibles
+function assignVehicleBlockEvent(emergencyType, eventId, lat, lon) {
+  const compatible = vehiclesCache
+    .filter(v => v.type === 'EMERGENCY_AMBULANCE')
+    .map(v => ({ v, eff: efficiencyOf(v.type, emergencyType), dist: distanceKm({ lat, lon }, { lat: v.lat, lon: v.lon }) }))
+    .filter(x => x.eff > 0)
+    .sort((a, b) => b.eff - a.eff || a.dist - b.dist);
+
+  if (compatible.length === 0) {
+    return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);font-size:11px;color:#94a3b8;">Aucun véhicule compatible</div>`;
+  }
+  const items = compatible.slice(0, 10)
+    .map(({ v, eff, dist }) => vehiclePickerRow(v, dist, `×${eff}`, 'assignVehicleToEvent', eventId))
+    .join('');
+  return `
+    <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,0,0,0.06);">
+      <div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">Assigner un véhicule (${compatible.length})</div>
+      <div style="max-height:180px;overflow-y:auto;">${items}</div>
+    </div>
+  `;
+}
+
+window.assignVehicleToFire = async function(vehicleId, fireId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await dispatchVehicleToFire(vehicleId, fireId);
+    if (btn) btn.textContent = '✓';
+  } catch (e) {
+    console.error(e);
+    if (btn) { btn.textContent = '✗'; btn.disabled = false; }
+  }
+};
+
+window.assignVehicleToEvent = async function(vehicleId, eventId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await dispatchVehicleToEvent(vehicleId, eventId);
+    if (btn) btn.textContent = '✓';
+  } catch (e) {
+    console.error(e);
+    if (btn) { btn.textContent = '✗'; btn.disabled = false; }
+  }
+};
 
 function injuredPopupBlock(injured) {
   if (!injured || injured.length === 0) return '';
@@ -173,6 +302,7 @@ function eventPopup(ev) {
     <div class="pop-row"><span class="pop-label">Étendue</span><span class="pop-value">${ev.range.toFixed(2)}</span></div>
     <div class="pop-row"><span class="pop-label">Blessés</span><span class="pop-value">${count}</span></div>
     ${injuredPopupBlock(ev.injuredPeopleDtoList)}
+    ${assignVehicleBlockEvent(ev.eventType, ev.id, ev.lat, ev.lon)}
   `;
 }
 

@@ -1,8 +1,6 @@
 # Optimisation de la flotte de véhicules — CPE Fighter 2026
 
-## 1. Modélisation du problème
-
-### Variables de décision
+## 1. Variables de décision
 
 | Variable | Véhicule | Places | Crew | Vitesse | Eff. feu | Eff. event (moy) |
 |---|---|---|---|---|---|---|
@@ -24,8 +22,8 @@ D'après la documentation du simulateur, l'atténuation d'un feu ou d'un event p
 atténuation = efficiency[TYPE] × (crewMember / vehicleCrewCapacity)
 ```
 
-Comme on envoie les véhicules à plein crew, le ratio `crewMember / vehicleCrewCapacity = 1`.  
-Le score effectif est donc pondéré par la vitesse (arrivée plus rapide = plus de points) :
+Comme on envoie les véhicules à plein crew, le ratio `crewMember / vehicleCrewCapacity = 1`.
+Le score est ensuite pondéré par la vitesse (arriver plus vite = réduire l'intensité avant les autres équipes) :
 
 ```
 score feu   = efficiency[FIRE]  × (vitesse / 110)
@@ -43,6 +41,8 @@ score event = efficiency[EVENT] × (vitesse / 110)
 | TURNTABLE (x₅) | 25.45 | 1.06 | 13.28 | 2.21 |
 | TRUCK (x₆) | 50.00 | 2.00 | 26.00 | 3.25 |
 | AMBULANCE (x₇) | 0 | 20.00 | 10.00 | **5.00 ★** |
+
+> L'AMBULANCE domine largement avec un ratio score/crew de 5.0, grâce à une efficiency event de 20 pour seulement 2 crew.
 
 ---
 
@@ -65,41 +65,62 @@ $$x_1, x_2, x_3, x_4, x_5, x_6, x_7 \geq 0, \text{ entiers}$$
 
 ### Résolution (PuLP / branch and bound)
 
+Sans aucune contrainte supplémentaire, le solveur place autant d'ambulances que possible car leur ratio score/crew est dominant. Avec 30 places et 20 crew, la solution sans garde-fous est :
+
 ```
 Statut : Optimal
 
-  1× TRUCK     : places=20, crew=8   → score=26.00
-  5× AMBULANCE : places=20, crew=10  → score=50.00
-  2× CAR       : places=4,  crew=4   → score=6.36
+  1× TRUCK     : places=20, crew=8
+  5× AMBULANCE : places=20, crew=10
 
-z                 = 82.36
-Places utilisées  : 44/45
-Crew utilisé      : 22/30
+z = 76.00   places=40/30 → non réalisable (dépasse places)
 ```
 
-> **Remarque** : le solveur exploite le CAR comme véhicule mixte (feu + event)
-> grâce à son efficacité double et sa vitesse de 150 km/h.
+En pratique avec 30 places et 20 crew le solveur trouve :
+
+```
+  1× TRUCK     : places=20, crew=8
+  2× AMBULANCE : places=8,  crew=4
+  1× CAR       : places=2,  crew=2
+
+z = 49.18
+Places utilisées : 30/30
+Crew utilisé     : 14/20
+```
 
 ---
 
-## 4. Programme linéaire — avec contraintes réalistes
+## 4. Problème : l'ambulance est trop dominante
 
-### Motivation
+Sans contrainte sur le nombre de véhicules par type, le solveur tend systématiquement vers un maximum d'ambulances. Par exemple avec 45 places et 30 crew et sans aucune limite :
 
-Avec la solution précédente (1 TRUCK 5 AMBULANCE 2 CAR sans contrainte) :
+```
+  8× CAR       : places=16, crew=16
+  9× AMBULANCE : places=36, crew=18  ← 17 véhicules quasi tous event
 
-|                           | Score feu | Score event | Ratio |
-|---------------------------|---|---|---|
-| 1 TRUCK 5 AMBULANCE 2 CAR | 10.91 | 180.04 | **0.06** — trop déséquilibré |
-| Ancienne composition      | 41.36 | 85.00 | **0.49** — équilibré |
+z = 102.72
+Score feu   : 10.91   ← quasi nul
+Score event : 180.04
+Ratio feu/event : 0.06
+```
 
-La map n'a pas assez de feux/events pour justifier plus de 5 véhicules de chaque type.  
-On ajoute deux contraintes :
+Ce déséquilibre est problématique en compétition : avec un score feu quasi nul, les autres équipes réduisent les feux avant nous et nous volent les points.
 
-### Contraintes supplémentaires
+| Composition | Score feu | Score event | Ratio |
+|---|---|---|---|
+| 8 CAR + 9 AMBULANCE (sans contrainte) | 10.91 | 180.04 | **0.06** — inutilisable |
+| Composition intuitive (1 WT + 4 FE + 4 AMB + 1 CAR) | 41.36 | 85.00 | **0.49** — équilibré |
 
-$$3 \leq x_1 + x_2 + x_3 + x_4 + x_5 + x_6 \leq 5 \quad \text{(véhicules feu)}$$
-$$x_7 \leq 5 \quad \text{(véhicules event)}$$
+Il faut donc ajouter des contraintes réalistes sur le nombre de véhicules.
+
+---
+
+## 5. Programme linéaire — contraintes réalistes (45 places, 30 crew)
+
+La caserne dispose de 45 places et 30 crew. La map ne génère pas assez de feux/events simultanés pour justifier plus de 5 véhicules par type. On ajoute :
+
+- Entre 3 et 5 véhicules capables de traiter les feux (tous sauf AMBULANCE)
+- Maximum 5 AMBULANCE
 
 ### Programme linéaire complet
 
@@ -132,20 +153,21 @@ Ratio feu/event   : 0.47
 
 ---
 
-## 5. Comparaison des compositions
+## 6. Comparaison finale
 
-| Composition                                             | Places | Crew | z | Score feu | Score event | Ratio |
-|---------------------------------------------------------|---|---|---|---|---|---|
-| Ancien (1 WT + 4 FE + 4 AMB + 1 CAR)                    | 44/45 | 29/30 | 66.54 | 41.36 | 85.00 | 0.49 |
-| Sans contraintes de vehicules (1 TRUCK + 5 AMB + 2 CAR) | 44/45 | 22/30 | 82.36 | 52.72 | 112.00 | 0.47 |
-| **Optimal final (2 CAR + 1 TRUCK + 5 AMB)**             | **44/45** | **22/30** | **82.36** | **52.72** | **112.00** | **0.47** |
+| Composition | Places | Crew | z | Score feu | Score event | Ratio |
+|---|---|---|---|---|---|---|
+| Sans contrainte (8 CAR + 9 AMB) | 44/45 | 26/30 | 102.72 | 10.91 | 180.04 | 0.06 |
+| Intuitive (1 WT + 4 FE + 4 AMB + 1 CAR) | 44/45 | 29/30 | 66.54 | 41.36 | 85.00 | 0.49 |
+| **Optimale finale (2 CAR + 1 TRUCK + 5 AMB)** | **44/45** | **22/30** | **82.36** | **52.72** | **112.00** | **0.47** |
 
 ---
 
-## 6. Conclusion
+## 7. Conclusions
 
-- Le **TRUCK** est le meilleur véhicule feu (score=50, le plus élevé de la flotte)
-- L'**AMBULANCE** est le meilleur véhicule event (score/crew=5.0, dominant)
-- Le **CAR** est sous-estimé intuitivement mais très efficace grâce à sa double efficacité feu+event et sa vitesse 150 km/h
-- Le **FIRE_ENGINE** est le moins efficace (score/crew=0.84 — le pire ratio)
+- Le **TRUCK** est le meilleur véhicule feu (score feu = 50, le plus élevé de la flotte)
+- L'**AMBULANCE** est le meilleur véhicule event (ratio score/crew = 5.0, dominant)
+- Le **CAR** est sous-estimé intuitivement mais très efficace grâce à sa double efficacité feu+event et sa vitesse de 150 km/h
+- Le **FIRE_ENGINE** est le moins rentable (score/crew = 0.84 — le pire ratio)
 - Les **places** sont le facteur limitant, pas le crew (8 crew inutilisés dans la solution optimale)
+- Sans contrainte sur le nombre de véhicules par type, le solveur sature en ambulances et rend la flotte inutile sur les feux

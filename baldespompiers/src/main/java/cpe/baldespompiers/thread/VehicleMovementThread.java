@@ -675,7 +675,6 @@ public class VehicleMovementThread {
             double dLon = toLon - currentLon;
             double dLat = toLat - currentLat;
             double dist = Math.sqrt(dLon * dLon + dLat * dLat);
-
             if (dist <= stepSize) {
                 // Distance restante inférieure à un pas : on saute directement sur la destination exacte
                 vehicleClient.moveVehicle(teamUuid, String.valueOf(vehicleId), // teleportation final pour éviter les erreurs d'arrondi qui empêcheraient d'atteindre exactement la position du feu/event

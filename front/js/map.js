@@ -1,5 +1,11 @@
 const map = L.map('map', { zoomControl: true }).setView([45.75, 4.85], 13);
 
+// Pane dédié véhicules — z-index CSS supérieur au pane markers par défaut (600)
+// garantit que les véhicules passent TOUJOURS devant feux/events quelle que soit leur latitude
+map.createPane('vehiclePane');
+map.getPane('vehiclePane').style.zIndex = 620;
+map.getPane('vehiclePane').style.pointerEvents = 'auto';
+
 // Tile layer — Carto Voyager (plus moderne / coloré que light_all)
 L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
   attribution: '© OpenStreetMap · © CARTO',
@@ -67,10 +73,10 @@ function fireIconFor(intensity) {
     : 'linear-gradient(135deg,#f97316,#dc2626)';
   return L.divIcon({
     html: `
-      <div style="background:${bg};border-radius:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center;">
-        <img src="../images/fire.svg" style="width:20px;height:20px;filter:brightness(0) invert(1);"/>
+      <div style="background:${bg};border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;">
+        <img src="../images/fire.svg" style="width:22px;height:22px;filter:brightness(0) invert(1);"/>
       </div>`,
-    iconSize: [38, 38], iconAnchor: [19, 19], className: 'fire-marker'
+    iconSize: [42, 42], iconAnchor: [21, 21], className: 'fire-marker', zIndexOffset: -1000
   });
 }
 
@@ -89,10 +95,10 @@ function vehicleIconFor(color, type) {
 
 const facilityIcon = L.divIcon({
   html: `
-    <div style="background:white;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:2.5px solid #22c55e;">
-      <img src="../images/facility.svg" style="width:24px;height:24px;"/>
+    <div style="background:white;width:50px;height:50px;border-radius:12px;display:flex;align-items:center;justify-content:center;border:2.5px solid #22c55e;">
+      <img src="../images/facility.svg" style="width:28px;height:28px;"/>
     </div>`,
-  iconSize: [42, 42], iconAnchor: [21, 21], className: 'facility-marker'
+  iconSize: [50, 50], iconAnchor: [25, 25], className: 'facility-marker'
 });
 
 // Événements (accidents / blessés / divers) — icône SVG avec couleur par type
@@ -104,14 +110,14 @@ const EVENT_META = {
 function eventIconFor(type) {
   const meta = EVENT_META[type] || EVENT_META.MISCELLANEOUS_OPERATION;
   const content = meta.img
-    ? `<img src="${meta.img}" style="width:20px;height:20px;filter:brightness(0) invert(1);"/>`
-    : `<span style="font-size:18px;">${meta.emoji}</span>`;
+    ? `<img src="${meta.img}" style="width:22px;height:22px;filter:brightness(0) invert(1);"/>`
+    : `<span style="font-size:20px;">${meta.emoji}</span>`;
   return L.divIcon({
     html: `
-      <div style="background:${meta.bg};border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border:2px solid white;">
+      <div style="background:${meta.bg};border-radius:50%;width:42px;height:42px;display:flex;align-items:center;justify-content:center;border:2px solid white;">
         ${content}
       </div>`,
-    iconSize: [36, 36], iconAnchor: [18, 18], className: 'event-marker'
+    iconSize: [42, 42], iconAnchor: [21, 21], className: 'event-marker', zIndexOffset: -1000
   });
 }
 
@@ -411,7 +417,7 @@ async function fetchFires() {
     applyFireVisibility();
     setStat('stat-fires', res.data.length);
     setStat('filter-fires-count', res.data.length);
-    renderSubFireFilters();
+    updateFireFilterCounts(); // met à jour les compteurs sans recréer les sliders
     renderFireList();
   } catch (err) { console.error(err); }
 }
@@ -496,7 +502,7 @@ async function fetchVehicles() {
 
       let state = vehicleState.get(vehicle.id);
       if (!state) {
-        const marker = L.marker([vehicle.lat, vehicle.lon], { icon: vehicleIconFor(color, vehicle.type) }).bindPopup(popup);
+        const marker = L.marker([vehicle.lat, vehicle.lon], { icon: vehicleIconFor(color, vehicle.type), pane: 'vehiclePane' }).bindPopup(popup);
         state = {
           marker, trailPoints: [], trailLayers: [], color, vehicleType: vehicle.type,
           prevLat: vehicle.lat, prevLon: vehicle.lon, prevTime: now,
@@ -592,8 +598,14 @@ function toggleLayer(name) {
 function toggleSubFilters(group) {
   const panel = document.getElementById(`sub-${group}`);
   const chevron = document.getElementById(`filter-${group}-chevron`);
+  const wasHidden = panel.classList.contains('hidden');
   panel.classList.toggle('hidden');
-  chevron.classList.toggle('expanded', !panel.classList.contains('hidden'));
+  chevron.classList.toggle('expanded', wasHidden);
+  // Render complet seulement à l'ouverture (pour initialiser les sliders proprement)
+  if (wasHidden) {
+    if (group === 'fires') renderSubFireFilters();
+    if (group === 'vehicles') renderSubVehicleFilters();
+  }
 }
 
 function toggleFireType(type) {
@@ -612,23 +624,34 @@ window.toggleSubFilters = toggleSubFilters;
 window.toggleFireType = toggleFireType;
 window.toggleVehicleType = toggleVehicleType;
 
+function fireObsMax() {
+  let obsMaxIntensity = 0, obsMaxRange = 0;
+  fireMarkerById.forEach(m => {
+    if ((m._intensity || 0) > obsMaxIntensity) obsMaxIntensity = m._intensity;
+    if ((m._range || 0) > obsMaxRange) obsMaxRange = m._range;
+  });
+  return { obsMaxIntensity: Math.ceil(obsMaxIntensity) || 100, obsMaxRange: Math.ceil(obsMaxRange) || 100 };
+}
+
+function updateDualRangeTrack(wrapId, min, max, obsMax) {
+  const fill = document.getElementById(wrapId + '-fill');
+  if (!fill) return;
+  const pMin = (min / obsMax) * 100;
+  const pMax = (max / obsMax) * 100;
+  fill.style.left = pMin + '%';
+  fill.style.width = (pMax - pMin) + '%';
+}
+
+// Render initial (structure HTML complète) — appelé une seule fois à l'ouverture
 function renderSubFireFilters() {
   const panel = document.getElementById('sub-fires');
   if (!panel) return;
 
-  // Compte feux par type + min/max intensité et étendue observés
+  const { obsMaxIntensity, obsMaxRange } = fireObsMax();
   const counts = {};
   for (const t of ALL_FIRE_TYPES) counts[t] = 0;
-  let obsMaxIntensity = 0, obsMaxRange = 0;
-  fireMarkerById.forEach(m => {
-    if (counts[m._fireType] != null) counts[m._fireType]++;
-    if ((m._intensity || 0) > obsMaxIntensity) obsMaxIntensity = m._intensity;
-    if ((m._range || 0) > obsMaxRange) obsMaxRange = m._range;
-  });
-  obsMaxIntensity = Math.ceil(obsMaxIntensity) || 100;
-  obsMaxRange = Math.ceil(obsMaxRange) || 100;
+  fireMarkerById.forEach(m => { if (counts[m._fireType] != null) counts[m._fireType]++; });
 
-  // Valeurs courantes des sliders (clamper si le max a diminué)
   const curMinI = Math.min(fireFilter.minIntensity, obsMaxIntensity);
   const curMaxI = fireFilter.maxIntensity === Infinity ? obsMaxIntensity : Math.min(fireFilter.maxIntensity, obsMaxIntensity);
   const curMinR = Math.min(fireFilter.minRange, obsMaxRange);
@@ -636,53 +659,74 @@ function renderSubFireFilters() {
 
   const typeChips = ALL_FIRE_TYPES.map(t => {
     const off = !enabledFireTypes.has(t);
-    return `<span class="sub-chip ${off ? 'off' : ''}" onclick="toggleFireType('${t}')">
-      ${FIRE_LABELS[t] || t}<span class="sub-count">${counts[t]}</span>
+    return `<span class="sub-chip ${off ? 'off' : ''}" id="chip-fire-${t}" onclick="toggleFireType('${t}')">
+      ${FIRE_LABELS[t] || t}<span class="sub-count" id="count-fire-${t}">${counts[t]}</span>
     </span>`;
   }).join('');
 
   panel.innerHTML = `
-    <div style="width:100%;padding:4px 0 2px;">
-      ${typeChips}
-    </div>
+    <div style="width:100%;padding:4px 0 2px;">${typeChips}</div>
     <div class="fire-range-filter">
-      <div class="range-label">⚡ Intensité <span id="lbl-intensity">${curMinI.toFixed(0)} – ${curMaxI.toFixed(0)}</span></div>
-      <div class="range-row">
+      <span class="range-label">⚡ Int.</span>
+      <div class="dual-range-wrap" id="wrap-intensity">
+        <div class="dual-range-track"></div>
+        <div class="dual-range-fill" id="wrap-intensity-fill"></div>
         <input type="range" min="0" max="${obsMaxIntensity}" step="0.5" value="${curMinI}"
           oninput="updateFireRange('minIntensity', this.value, ${obsMaxIntensity})"
-          class="range-slider" id="slider-intensity-min">
+          class="range-slider range-min" id="slider-intensity-min">
         <input type="range" min="0" max="${obsMaxIntensity}" step="0.5" value="${curMaxI}"
           oninput="updateFireRange('maxIntensity', this.value, ${obsMaxIntensity})"
-          class="range-slider" id="slider-intensity-max">
+          class="range-slider range-max" id="slider-intensity-max">
       </div>
+      <span class="range-values" id="lbl-intensity">${curMinI.toFixed(0)}–${curMaxI.toFixed(0)}</span>
     </div>
     <div class="fire-range-filter">
-      <div class="range-label">📐 Étendue <span id="lbl-range">${curMinR.toFixed(0)} – ${curMaxR.toFixed(0)}</span></div>
-      <div class="range-row">
+      <span class="range-label">📐 Ét.</span>
+      <div class="dual-range-wrap" id="wrap-range">
+        <div class="dual-range-track"></div>
+        <div class="dual-range-fill" id="wrap-range-fill"></div>
         <input type="range" min="0" max="${obsMaxRange}" step="0.5" value="${curMinR}"
           oninput="updateFireRange('minRange', this.value, ${obsMaxRange})"
-          class="range-slider" id="slider-range-min">
+          class="range-slider range-min" id="slider-range-min">
         <input type="range" min="0" max="${obsMaxRange}" step="0.5" value="${curMaxR}"
           oninput="updateFireRange('maxRange', this.value, ${obsMaxRange})"
-          class="range-slider" id="slider-range-max">
+          class="range-slider range-max" id="slider-range-max">
       </div>
+      <span class="range-values" id="lbl-range">${curMinR.toFixed(0)}–${curMaxR.toFixed(0)}</span>
     </div>
   `;
+  updateDualRangeTrack('wrap-intensity', curMinI, curMaxI, obsMaxIntensity);
+  updateDualRangeTrack('wrap-range', curMinR, curMaxR, obsMaxRange);
+}
+
+// Mise à jour légère (compteurs chips uniquement) — appelé à chaque fetchFires
+function updateFireFilterCounts() {
+  const counts = {};
+  for (const t of ALL_FIRE_TYPES) counts[t] = 0;
+  fireMarkerById.forEach(m => { if (counts[m._fireType] != null) counts[m._fireType]++; });
+  for (const t of ALL_FIRE_TYPES) {
+    const el = document.getElementById(`count-fire-${t}`);
+    if (el) el.textContent = counts[t];
+  }
 }
 
 window.updateFireRange = function(key, value, obsMax) {
   fireFilter[key] = key.startsWith('max') && parseFloat(value) >= obsMax ? Infinity : parseFloat(value);
-  // Cohérence min <= max
   if (fireFilter.minIntensity > fireFilter.maxIntensity) fireFilter.minIntensity = fireFilter.maxIntensity;
   if (fireFilter.minRange > fireFilter.maxRange) fireFilter.minRange = fireFilter.maxRange;
   applyFireVisibility();
-  // Met à jour juste les labels sans re-render complet (évite reset des sliders)
-  const iMin = fireFilter.minIntensity, iMax = fireFilter.maxIntensity === Infinity ? obsMax : fireFilter.maxIntensity;
-  const rMin = fireFilter.minRange, rMax = fireFilter.maxRange === Infinity ? obsMax : fireFilter.maxRange;
-  const lblI = document.getElementById('lbl-intensity');
-  const lblR = document.getElementById('lbl-range');
-  if (lblI && key.includes('ntensity')) lblI.textContent = `${iMin.toFixed(0)} – ${iMax.toFixed(0)}`;
-  if (lblR && key.includes('ange')) lblR.textContent = `${rMin.toFixed(0)} – ${rMax.toFixed(0)}`;
+  const { obsMaxIntensity, obsMaxRange } = fireObsMax();
+  const iMax = fireFilter.maxIntensity === Infinity ? obsMaxIntensity : fireFilter.maxIntensity;
+  const rMax = fireFilter.maxRange === Infinity ? obsMaxRange : fireFilter.maxRange;
+  if (key.includes('ntensity')) {
+    const el = document.getElementById('lbl-intensity');
+    if (el) el.textContent = `${fireFilter.minIntensity.toFixed(0)}–${iMax.toFixed(0)}`;
+    updateDualRangeTrack('wrap-intensity', fireFilter.minIntensity, iMax, obsMaxIntensity);
+  } else {
+    const el = document.getElementById('lbl-range');
+    if (el) el.textContent = `${fireFilter.minRange.toFixed(0)}–${rMax.toFixed(0)}`;
+    updateDualRangeTrack('wrap-range', fireFilter.minRange, rMax, obsMaxRange);
+  }
 };
 
 function renderSubVehicleFilters() {

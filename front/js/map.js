@@ -8,11 +8,12 @@ L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r
 }).addTo(map);
 
 // ── Refresh rates ───────────────────────────────────────────
-const VEHICLE_REFRESH_MS = 120;
+const VEHICLE_REFRESH_MS = 250;   // poll serveur (4 Hz) — la fluidité vient de l'interpolation
 const STATIC_REFRESH_MS  = 2000;
+const TRAIL_SAMPLE_MS    = 80;    // fréquence d'échantillonnage des trails (depuis position interpolée)
 
 // ── Trails ──────────────────────────────────────────────────
-const TRAIL_MAX_POINTS = 150;
+const TRAIL_MAX_POINTS = 200;    // ~16s à 80ms
 const TRAIL_MIN_DIST   = 0.00003;
 
 // Doit rester aligné avec VehicleType.java (cf. vehicles.js)
@@ -146,6 +147,19 @@ function syncMarkersById(items, store, getId, build, visible, onUpdate) {
 
 // Layer toggles (UI filters)
 const layerVisibility = { fires: true, vehicles: true, trails: true, facilities: true, events: true };
+
+// Sous-filtres par type (aligné sur les enums backend)
+const ALL_FIRE_TYPES = ['A', 'B_Gasoline', 'B_Alcohol', 'B_Plastics', 'C_Flammable_Gases', 'D_Metals', 'E_Electric'];
+const ALL_VEHICLE_TYPES = ['CAR', 'FIRE_ENGINE', 'PUMPER_TRUCK', 'WATER_TENDERS', 'TURNTABLE_LADDER_TRUCK', 'TRUCK', 'EMERGENCY_AMBULANCE'];
+const enabledFireTypes = new Set(ALL_FIRE_TYPES);
+const enabledVehicleTypes = new Set(ALL_VEHICLE_TYPES);
+
+// Filtres intensité / étendue (valeurs min/max courantes)
+const fireFilter = { minIntensity: 0, maxIntensity: Infinity, minRange: 0, maxRange: Infinity };
+const FIRE_LABELS = {
+  A: 'A · Secs', B_Gasoline: 'B · Essence', B_Alcohol: 'B · Alcool', B_Plastics: 'B · Plastiques',
+  C_Flammable_Gases: 'C · Gaz', D_Metals: 'D · Métaux', E_Electric: 'E · Élec',
+};
 
 // ── Stats / popups helpers ──────────────────────────────────
 function setStat(id, value) {
@@ -373,24 +387,32 @@ async function fetchFires() {
       f => f.id,
       f => {
         const marker = L.marker([f.lat, f.lon], { icon: fireIconFor(f.intensity) })
-          .bindPopup(firePopup(f), { maxWidth: 320 }); // ouverture du popup à 320px de large pour éviter les problèmes de mise en page avec les listes de blessés trop longues
-        marker._isLowIntensity = f.intensity <= LOW_INTENSITY_THRESHOLD; // on stocke cette info dans le marker pour éviter de recalculer l'icône à chaque update (seule la transition entre "faible" et "fort" nécessite un changement d'icône)
+          .bindPopup(firePopup(f), { maxWidth: 320 });
+        marker._isLowIntensity = f.intensity <= LOW_INTENSITY_THRESHOLD;
+        marker._fireType = f.type;
+        marker._intensity = f.intensity;
+        marker._range = f.range;
         return marker;
       },
-      layerVisibility.fires, // on ajoute les nouveaux feux à la carte seulement si le layer est visible
+      false, // visibilité gérée par applyFireVisibility juste après (prend en compte le sous-filtre par type)
       (marker, f) => {
-        marker.setLatLng([f.lat, f.lon]); // mise à jour de la position du feu
-        marker.getPopup().setContent(firePopup(f)); // mise à jour du contenu du popup (intensité, blessés, etc.)
-        const lowNow = f.intensity <= LOW_INTENSITY_THRESHOLD; // vérification si le feu est maintenant considéré comme "faible" ou "fort"
+        marker.setLatLng([f.lat, f.lon]);
+        marker.getPopup().setContent(firePopup(f));
+        marker._fireType = f.type;
+        marker._intensity = f.intensity;
+        marker._range = f.range;
+        const lowNow = f.intensity <= LOW_INTENSITY_THRESHOLD;
         if (marker._isLowIntensity !== lowNow) {
           marker.setIcon(fireIconFor(f.intensity));
           marker._isLowIntensity = lowNow;
         }
       }
     );
+    applyFireVisibility();
     setStat('stat-fires', res.data.length);
     setStat('filter-fires-count', res.data.length);
-    renderFireList(); // mise à jour du panneau liste des feux à chaque refresh (pour refléter les changements d'intensité et les nouveaux feux)
+    renderSubFireFilters();
+    renderFireList();
   } catch (err) { console.error(err); }
 }
 
@@ -450,10 +472,11 @@ function updateVehicleTrail(state, lat, lon, color) {
   if (pts.length > TRAIL_MAX_POINTS) pts.shift();
 
   state.trailLayers.forEach(l => map.removeLayer(l));
+  const showTrail = layerVisibility.trails && (state.vehicleType == null || enabledVehicleTypes.has(state.vehicleType));
   state.trailLayers = pts.map((p, i) => {
     const opacity = 0.15 + 0.55 * (i / pts.length);
     const dot = trailDotFor(p.lat, p.lon, color, opacity);
-    if (layerVisibility.trails) dot.addTo(map);
+    if (showTrail) dot.addTo(map);
     return dot;
   });
 }
@@ -464,6 +487,7 @@ async function fetchVehicles() {
     vehiclesCache = res.data;
     const seen = new Set();
     let onMission = 0;
+    const now = performance.now();
 
     res.data.forEach(vehicle => {
       seen.add(vehicle.id);
@@ -473,16 +497,25 @@ async function fetchVehicles() {
       let state = vehicleState.get(vehicle.id);
       if (!state) {
         const marker = L.marker([vehicle.lat, vehicle.lon], { icon: vehicleIconFor(color, vehicle.type) }).bindPopup(popup);
-        if (layerVisibility.vehicles) marker.addTo(map);
-        state = { marker, trailPoints: [], trailLayers: [], color };
+        state = {
+          marker, trailPoints: [], trailLayers: [], color, vehicleType: vehicle.type,
+          prevLat: vehicle.lat, prevLon: vehicle.lon, prevTime: now,
+          targetLat: vehicle.lat, targetLon: vehicle.lon,
+          displayLat: vehicle.lat, displayLon: vehicle.lon,
+          lastTrailSampleAt: 0,
+        };
         vehicleState.set(vehicle.id, state);
+        if (isVehicleVisible(state)) marker.addTo(map);
       } else {
-        state.marker.setLatLng([vehicle.lat, vehicle.lon]);
+        state.vehicleType = vehicle.type;
+        // Snapshot la position interpolée actuelle comme nouveau "prev", target = nouvelle position serveur
+        state.prevLat = state.displayLat;
+        state.prevLon = state.displayLon;
+        state.prevTime = now;
+        state.targetLat = vehicle.lat;
+        state.targetLon = vehicle.lon;
         state.marker.getPopup().setContent(popup);
       }
-
-      // "En mission" = pas à sa caserne d'attache (approximation distance > 50m)
-      updateVehicleTrail(state, vehicle.lat, vehicle.lon, color);
     });
 
     // Cleanup véhicules disparus
@@ -494,6 +527,8 @@ async function fetchVehicles() {
       }
     }
 
+    applyVehicleVisibility();
+    renderSubVehicleFilters();
     // Stats: "en mission" = pas dans la tolérance d'une caserne
     onMission = countOnMission();
     setStat('stat-vehicles', res.data.length);
@@ -512,23 +547,177 @@ function countOnMission() {
   }).length;
 }
 
+// ── Visibilité effective d'un marker (couche + type) ─────────
+function isFireVisible(marker) {
+  if (!layerVisibility.fires) return false;
+  if (!enabledFireTypes.has(marker._fireType)) return false;
+  if (marker._intensity < fireFilter.minIntensity || marker._intensity > fireFilter.maxIntensity) return false;
+  if (marker._range < fireFilter.minRange || marker._range > fireFilter.maxRange) return false;
+  return true;
+}
+function isVehicleVisible(state) {
+  return layerVisibility.vehicles && enabledVehicleTypes.has(state.vehicleType);
+}
+function applyFireVisibility() {
+  fireMarkerById.forEach(m => isFireVisible(m) ? m.addTo(map) : map.removeLayer(m));
+}
+function applyVehicleVisibility() {
+  vehicleState.forEach(s => {
+    const vis = isVehicleVisible(s);
+    vis ? s.marker.addTo(map) : map.removeLayer(s.marker);
+    s.trailLayers.forEach(l => (vis && layerVisibility.trails) ? l.addTo(map) : map.removeLayer(l));
+  });
+}
+
 // ── Toggle des layers ───────────────────────────────────────
 function toggleLayer(name) {
   layerVisibility[name] = !layerVisibility[name];
   document.getElementById(`filter-${name}`).classList.toggle('off', !layerVisibility[name]);
 
   if (name === 'fires') {
-    fireMarkerById.forEach(m => layerVisibility.fires ? m.addTo(map) : map.removeLayer(m));
+    applyFireVisibility();
   } else if (name === 'events') {
     eventMarkerById.forEach(m => layerVisibility.events ? m.addTo(map) : map.removeLayer(m));
   } else if (name === 'facilities') {
     facilityMarkerById.forEach(m => layerVisibility.facilities ? m.addTo(map) : map.removeLayer(m));
   } else if (name === 'vehicles') {
-    vehicleState.forEach(s => layerVisibility.vehicles ? s.marker.addTo(map) : map.removeLayer(s.marker));
+    applyVehicleVisibility();
   } else if (name === 'trails') {
-    vehicleState.forEach(s => s.trailLayers.forEach(l => layerVisibility.trails ? l.addTo(map) : map.removeLayer(l)));
+    vehicleState.forEach(s => s.trailLayers.forEach(l => (layerVisibility.trails && isVehicleVisible(s)) ? l.addTo(map) : map.removeLayer(l)));
     document.getElementById('filter-trails-count').textContent = layerVisibility.trails ? 'on' : 'off';
   }
+}
+
+// ── Sous-filtres : expand + toggle par type ──────────────────
+function toggleSubFilters(group) {
+  const panel = document.getElementById(`sub-${group}`);
+  const chevron = document.getElementById(`filter-${group}-chevron`);
+  panel.classList.toggle('hidden');
+  chevron.classList.toggle('expanded', !panel.classList.contains('hidden'));
+}
+
+function toggleFireType(type) {
+  if (enabledFireTypes.has(type)) enabledFireTypes.delete(type);
+  else enabledFireTypes.add(type);
+  applyFireVisibility();
+  renderSubFireFilters();
+}
+function toggleVehicleType(type) {
+  if (enabledVehicleTypes.has(type)) enabledVehicleTypes.delete(type);
+  else enabledVehicleTypes.add(type);
+  applyVehicleVisibility();
+  renderSubVehicleFilters();
+}
+window.toggleSubFilters = toggleSubFilters;
+window.toggleFireType = toggleFireType;
+window.toggleVehicleType = toggleVehicleType;
+
+function renderSubFireFilters() {
+  const panel = document.getElementById('sub-fires');
+  if (!panel) return;
+
+  // Compte feux par type + min/max intensité et étendue observés
+  const counts = {};
+  for (const t of ALL_FIRE_TYPES) counts[t] = 0;
+  let obsMaxIntensity = 0, obsMaxRange = 0;
+  fireMarkerById.forEach(m => {
+    if (counts[m._fireType] != null) counts[m._fireType]++;
+    if ((m._intensity || 0) > obsMaxIntensity) obsMaxIntensity = m._intensity;
+    if ((m._range || 0) > obsMaxRange) obsMaxRange = m._range;
+  });
+  obsMaxIntensity = Math.ceil(obsMaxIntensity) || 100;
+  obsMaxRange = Math.ceil(obsMaxRange) || 100;
+
+  // Valeurs courantes des sliders (clamper si le max a diminué)
+  const curMinI = Math.min(fireFilter.minIntensity, obsMaxIntensity);
+  const curMaxI = fireFilter.maxIntensity === Infinity ? obsMaxIntensity : Math.min(fireFilter.maxIntensity, obsMaxIntensity);
+  const curMinR = Math.min(fireFilter.minRange, obsMaxRange);
+  const curMaxR = fireFilter.maxRange === Infinity ? obsMaxRange : Math.min(fireFilter.maxRange, obsMaxRange);
+
+  const typeChips = ALL_FIRE_TYPES.map(t => {
+    const off = !enabledFireTypes.has(t);
+    return `<span class="sub-chip ${off ? 'off' : ''}" onclick="toggleFireType('${t}')">
+      ${FIRE_LABELS[t] || t}<span class="sub-count">${counts[t]}</span>
+    </span>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div style="width:100%;padding:4px 0 2px;">
+      ${typeChips}
+    </div>
+    <div class="fire-range-filter">
+      <div class="range-label">⚡ Intensité <span id="lbl-intensity">${curMinI.toFixed(0)} – ${curMaxI.toFixed(0)}</span></div>
+      <div class="range-row">
+        <input type="range" min="0" max="${obsMaxIntensity}" step="0.5" value="${curMinI}"
+          oninput="updateFireRange('minIntensity', this.value, ${obsMaxIntensity})"
+          class="range-slider" id="slider-intensity-min">
+        <input type="range" min="0" max="${obsMaxIntensity}" step="0.5" value="${curMaxI}"
+          oninput="updateFireRange('maxIntensity', this.value, ${obsMaxIntensity})"
+          class="range-slider" id="slider-intensity-max">
+      </div>
+    </div>
+    <div class="fire-range-filter">
+      <div class="range-label">📐 Étendue <span id="lbl-range">${curMinR.toFixed(0)} – ${curMaxR.toFixed(0)}</span></div>
+      <div class="range-row">
+        <input type="range" min="0" max="${obsMaxRange}" step="0.5" value="${curMinR}"
+          oninput="updateFireRange('minRange', this.value, ${obsMaxRange})"
+          class="range-slider" id="slider-range-min">
+        <input type="range" min="0" max="${obsMaxRange}" step="0.5" value="${curMaxR}"
+          oninput="updateFireRange('maxRange', this.value, ${obsMaxRange})"
+          class="range-slider" id="slider-range-max">
+      </div>
+    </div>
+  `;
+}
+
+window.updateFireRange = function(key, value, obsMax) {
+  fireFilter[key] = key.startsWith('max') && parseFloat(value) >= obsMax ? Infinity : parseFloat(value);
+  // Cohérence min <= max
+  if (fireFilter.minIntensity > fireFilter.maxIntensity) fireFilter.minIntensity = fireFilter.maxIntensity;
+  if (fireFilter.minRange > fireFilter.maxRange) fireFilter.minRange = fireFilter.maxRange;
+  applyFireVisibility();
+  // Met à jour juste les labels sans re-render complet (évite reset des sliders)
+  const iMin = fireFilter.minIntensity, iMax = fireFilter.maxIntensity === Infinity ? obsMax : fireFilter.maxIntensity;
+  const rMin = fireFilter.minRange, rMax = fireFilter.maxRange === Infinity ? obsMax : fireFilter.maxRange;
+  const lblI = document.getElementById('lbl-intensity');
+  const lblR = document.getElementById('lbl-range');
+  if (lblI && key.includes('ntensity')) lblI.textContent = `${iMin.toFixed(0)} – ${iMax.toFixed(0)}`;
+  if (lblR && key.includes('ange')) lblR.textContent = `${rMin.toFixed(0)} – ${rMax.toFixed(0)}`;
+};
+
+function renderSubVehicleFilters() {
+  const panel = document.getElementById('sub-vehicles');
+  if (!panel) return;
+  const counts = {};
+  for (const t of ALL_VEHICLE_TYPES) counts[t] = 0;
+  vehiclesCache.forEach(v => { if (counts[v.type] != null) counts[v.type]++; });
+  panel.innerHTML = ALL_VEHICLE_TYPES.map(t => {
+    const off = !enabledVehicleTypes.has(t);
+    const icon = t === 'EMERGENCY_AMBULANCE' ? '🚑' : t === 'WATER_TENDERS' ? '🚛' : '🚒';
+    return `<span class="sub-chip ${off ? 'off' : ''}" onclick="toggleVehicleType('${t}')">
+      ${icon} ${t.replace(/_/g, ' ').toLowerCase()}<span class="sub-count">${counts[t]}</span>
+    </span>`;
+  }).join('');
+}
+
+// ── Boucle d'animation : interpole entre prev → target à ~60 fps natif ─
+function animationLoop() {
+  const now = performance.now();
+  for (const state of vehicleState.values()) {
+    const elapsed = now - state.prevTime;
+    const t = Math.min(1, elapsed / VEHICLE_REFRESH_MS);
+    state.displayLat = state.prevLat + (state.targetLat - state.prevLat) * t;
+    state.displayLon = state.prevLon + (state.targetLon - state.prevLon) * t;
+    state.marker.setLatLng([state.displayLat, state.displayLon]);
+
+    if (now - state.lastTrailSampleAt >= TRAIL_SAMPLE_MS) {
+      state.lastTrailSampleAt = now;
+      updateVehicleTrail(state, state.displayLat, state.displayLon, state.color);
+    }
+  }
+  // Stats temps réel (cheap, pas d'API call)
+  setStat('stat-mission', countOnMission());
+  requestAnimationFrame(animationLoop);
 }
 
 // ── Boot ────────────────────────────────────────────────────
@@ -538,3 +727,4 @@ fetchFacilities().then(fetchVehicles); // casernes d'abord pour stat "en mission
 
 setInterval(fetchVehicles, VEHICLE_REFRESH_MS);
 setInterval(() => { fetchFires(); fetchEvents(); fetchFacilities(); }, STATIC_REFRESH_MS);
+requestAnimationFrame(animationLoop);

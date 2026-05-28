@@ -39,7 +39,7 @@ body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-
 }
 
 .filter-btn {
-  margin-top: 6px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -56,6 +56,62 @@ body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-
 }
 .filter-btn:first-of-type { margin-top: 0; }
 .filter-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+
+.filter-group { display: contents; }
+.filter-group .filter-btn { padding: 0; overflow: hidden; }
+.filter-btn-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.filter-expand {
+  padding: 8px 10px;
+  border-left: 1px solid #e2e8f0;
+  cursor: pointer;
+  font-size: 10px;
+  color: #94a3b8;
+  transition: transform 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+.filter-expand:hover { color: #475569; }
+.filter-expand.expanded { transform: rotate(180deg); color: #475569; }
+
+.sub-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 4px 2px;
+  margin-top: 4px;
+}
+.sub-filters.hidden { display: none; }
+.sub-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+.sub-chip:hover { background: #f8fafc; }
+.sub-chip.off { opacity: 0.35; background: #f1f5f9; }
+.sub-chip .sub-count {
+  background: #f1f5f9;
+  color: #64748b;
+  border-radius: 6px;
+  padding: 0 5px;
+  font-size: 9px;
+}
+.sub-chip.off .sub-count { background: white; }
 .filter-btn.off { opacity: 0.45; }
 .filter-btn .count {
   background: #f1f5f9;

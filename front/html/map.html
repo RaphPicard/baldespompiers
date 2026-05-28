@@ -45,15 +45,26 @@
 
     <div class="panel-separator"></div>
 
-    <div class="filter-btn" id="filter-fires" onclick="toggleLayer('fires')">
-      🔥 Feux <span class="count" id="filter-fires-count">0</span>
+    <div class="filter-group">
+      <div class="filter-btn" id="filter-fires">
+        <span onclick="toggleLayer('fires')" class="filter-btn-main">🔥 Feux <span class="count" id="filter-fires-count">0</span></span>
+        <span class="filter-expand" onclick="toggleSubFilters('fires')" id="filter-fires-chevron">▾</span>
+      </div>
+      <div class="sub-filters hidden" id="sub-fires"></div>
     </div>
+
     <div class="filter-btn" id="filter-events" onclick="toggleLayer('events')">
       🩹 Accidents <span class="count" id="filter-events-count">0</span>
     </div>
-    <div class="filter-btn" id="filter-vehicles" onclick="toggleLayer('vehicles')">
-      🚒 Véhicules <span class="count" id="filter-vehicles-count">0</span>
+
+    <div class="filter-group">
+      <div class="filter-btn" id="filter-vehicles">
+        <span onclick="toggleLayer('vehicles')" class="filter-btn-main">🚒 Véhicules <span class="count" id="filter-vehicles-count">0</span></span>
+        <span class="filter-expand" onclick="toggleSubFilters('vehicles')" id="filter-vehicles-chevron">▾</span>
+      </div>
+      <div class="sub-filters hidden" id="sub-vehicles"></div>
     </div>
+
     <div class="filter-btn" id="filter-trails" onclick="toggleLayer('trails')">
       ✨ Trajets <span class="count" id="filter-trails-count">on</span>
     </div>

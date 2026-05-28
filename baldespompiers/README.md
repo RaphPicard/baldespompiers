@@ -6,33 +6,18 @@ Système web temps réel pour affecter des véhicules d'urgence aux incendies et
 
 ---
 
-## 🎯 Vision
-
-- **Backoffice :** Spring Boot monolithe qui communique avec le simulateur distant `tp.cpe.fr:8081/8083`
-- **Frontend :** Leaflet (carte interactive) affichant feux, véhicules, casernes en temps réel
-- **Score :** Points gagnés selon efficacité (distance, carburant, équipage, routage)
-- **Scope :** Lot 1–3 en 28h (Lot 4 = extensions optionnelles)
-
----
-
-## 📊 Architecture en 3 couches
+## Architecture
 
 ```
 Frontend (Leaflet)
     ↓ GET /api/fires, POST /api/vehicles, etc.
     ↓
-Controllers REST ← ← expose notre API
+Controllers REST
     ↓
-Services + Clients ← ← logique métier + appels au simulateur
+Services + Clients
     ↓
-tp.cpe.fr:8083 ← ← simulateur (polling, dispatch)
+tp.cpe.fr:8083  (simulateur)
 ```
-
-**Controllers** = API pour le frontend.
-**Clients** = appels au simulateur externe.
-**Services** = logique métier (affectation, cache, score).
-
-### Flux détaillé des données
 
 ```
 Simulateur (tp.cpe.fr:8083)
@@ -42,7 +27,7 @@ Simulateur (tp.cpe.fr:8083)
       [EventPollerThread]  ←  @Scheduled (toutes les 5s)
            ↙              ↘
    cachedFires/Vehicles    [EmergencyManagerService.dispatchAll()]
-           ↓                         ↓  (utilise les Types pour décider)
+           ↓                         ↓
    [FireRestCrt]           [VehicleMovementThread]
        ↓                         ↓
   GET /api/fires         [VehicleClient.moveVehicle()]
@@ -51,262 +36,98 @@ Simulateur (tp.cpe.fr:8083)
 ```
 
 - Les **Clients** sont les seuls à faire des appels HTTP vers le simulateur.
-- **EventPollerThread** orchestre le timing : il récupère via les clients, met en cache, puis déclenche `EmergencyManagerService`.
-- Les **Controllers** lisent le cache du thread (pas les clients directement) → pas de requête simulateur à chaque appel front.
-- Les **DTOs** (`FireDto`, `VehicleDto`…) transitent sans transformation du simulateur jusqu'au front.
-- Les **Types** (enums `FireType`, `VehicleType`…) portent la sémantique métier utilisée dans `EmergencyManagerService` pour filtrer et scorer.
+- **EventPollerThread** orchestre le timing : récupère, met en cache, déclenche `EmergencyManagerService`.
+- Les **Controllers** lisent le cache (pas les clients directement) → pas de requête simulateur à chaque appel front.
+- Les **Types** (`FireType`, `VehicleType`…) portent la sémantique métier utilisée pour filtrer et scorer.
 
 ---
 
-## 🔄 Flux complet : créer et dispatcher un véhicule
-
-### 1️⃣ Front-end clique "Ajouter camion"
-```javascript
-fetch('/api/vehicles', {
-    method: 'POST',
-    body: JSON.stringify({type: 'FIRE_ENGINE', facilityId: 'caserne-1'})
-})
-```
-
-### 2️⃣ VehicleController reçoit et délègue
-```java
-@PostMapping
-public VehicleDto addVehicle(@RequestBody VehicleDto dto) {
-    return vehicleService.addVehicle(dto);
-}
-```
-
-### 3️⃣ VehicleService valide + appelle le simulateur
-```java
-public VehicleDto addVehicle(VehicleDto dto) {
-    // Validation
-    VehicleDto created = vehicleClient.addVehicle(teamUuid, dto);
-    // Stocke en cache local
-    stateCache.put(created.getId(), new VehicleStateCache());
-    return created;
-}
-```
-
-### 4️⃣ VehicleClient appelle POST /vehicle/{teamuuid}
-```java
-public VehicleDto addVehicle(String teamUuid, VehicleDto dto) {
-    return webClient.post()
-        .uri("/vehicle/{teamuuid}", teamUuid)
-        .bodyValue(dto)
-        .retrieve()
-        .bodyToMono(VehicleDto.class)
-        .block();
-}
-```
-
-### 5️⃣ Simulateur retourne le véhicule créé
-→ Cache local mis à jour
-→ Controller retourne au frontend
-→ Frontend affiche le marqueur sur la carte
-
----
-
-## 📦 Structure du projet
+## Structure du projet
 
 ```
-cpefighter/
+baldespompiers/
 ├── pom.xml
-├── src/main/java/fr/cpe/cpefighter/
-│   ├── CpeFighterApplication.java
-│   ├── api/controller/          ← ← endpoints pour le front (7 controllers)
-│   ├── service/                 ← ← logique métier (6 services + 2 stratégies d'affectation)
-│   ├── client/                  ← ← appels au simulateur (10 clients)
-│   ├── config/                  ← ← WebClient, CORS, Security
-│   ├── model/                   ← ← état interne (MissionState, VehicleStateCache, etc.)
-│   └── thread/                  ← ← polling + déplacement (@Scheduled, @Async)
-├── src/main/resources/
-│   └── application.properties
-└── README.md
+└── src/main/java/cpe/baldespompiers/
+    ├── api/controller/      ← endpoints REST pour le front
+    ├── service/             ← logique métier (dispatch, scoring, events)
+    ├── client/              ← appels HTTP vers le simulateur
+    ├── config/              ← WebClient, CORS, Security, ThreadPool
+    ├── model/dto/           ← FireDto, VehicleDto, FacilityDto…
+    ├── model/type/          ← VehicleType, LiquidType, EmergencyType…
+    ├── thread/              ← EventPollerThread, VehicleMovementThread
+    └── tools/               ← GisTools (calculs géo, fuel check)
 ```
 
 ---
 
-## 🎓 Les 3 lots à faire
+## Lots
 
-| Lot | Quoi | Points | Facteur |
-|-----|------|--------|--------|
-| **Lot 1** | Affichage feux/véhicules sur carte Leaflet + polling | Base | ×1 |
-| **Lot 2** | CRUD casernes + véhicules, affectation manuelle | +50 | ×1 |
-| **Lot 3.1** | Téléportation + affectation gloutonne (distance) | +50 | ×2 |
-| **Lot 3.2** | Déplacement ligne droite + greedy assignment | +50 | ×2 |
-| **Lot 3.3** | Routage OSRM + optimisation multi-critères | +50 | ×3 |
-| **Lot 4** | Carburant, extincteur, équipage, fatigue | +50 each | Variante |
-
----
-
-## 👥 Répartition des tâches (4 ingénieurs)
-
-### 👨‍💼 Ingénieur 1 — Backend Core & API
-
-**Responsabilités :**
-- Setup Maven + configurations (AppConfig, SecurityConfig, RestClientConfig)
-- Implémenter WorkSessionService + init JWT au démarrage
-- Tous les **Clients** (10 fichiers) — garantir 100% fidèle au swagger
-- EmergencyManagerService + VehicleService + FacilityService
-- Tous les **Controllers** (7 fichiers) — GET/POST/DELETE REST
-- Tests unitaires pour les services critiques
-
-**Délai :** ~12h (core setup 2h, clients 4h, services 3h, controllers 2h, tests 1h)
+| Lot | Quoi | Facteur |
+|-----|------|---------|
+| **Lot 1** | Affichage feux/véhicules sur carte Leaflet + polling | ×1 |
+| **Lot 2** | CRUD casernes + véhicules, affectation manuelle | ×1 |
+| **Lot 3.1** | Téléportation + affectation gloutonne (distance) | ×2 |
+| **Lot 3.2** | Déplacement ligne droite + greedy assignment | ×2 |
+| **Lot 3.3** | Routage OSRM + optimisation multi-critères | ×3 |
+| **Lot 4** | Carburant, extincteur, équipage, fatigue | Variante |
 
 ---
 
-### 🗺️ Ingénieur 2 — Frontend Leaflet
+## Ressources
 
-**Responsabilités :**
-- HTML/CSS/JS Leaflet : carte interactive de Lyon
-- Polling `GET /api/fires` et `GET /api/events` → affichage dynamique des marqueurs
-- Panneau détails : clique sur un feu → affiche intensité, étendue, position
-- Filtres : par type, intensité, etc.
-- Tableau score en temps réel (polling `/api/score`)
-- Responsive design (mobile OK)
-
-**Délai :** ~10h (setup Leaflet 2h, affichage feux 2h, interactions 2h, filtres 1h, polish 2h, tests 1h)
-
----
-
-### 🚗 Ingénieur 3 — Dispatch & Déplacement (Lot 3)
-
-**Responsabilités :**
-- VehicleMovementThread (@Async) : implémente les 3 modes (teleport, straight, road)
-- GreedyAssignmentStrategy : distance euclidienne, sélectionne le plus proche
-- OptimizedAssignmentStrategy : scoring multi-critères
-- Test des déplacements progressifs (évite les overlap)
-- OsrmRouterClient pour le routage réel (OSRM API)
-- Calcul du nombre d'étapes en fonction de la vitesse du véhicule
-
-**Délai :** ~14h (VehicleMovementThread 3h, stratégies 3h, OSRM 2h, tests 3h, tuning 2h, buffer 1h)
-
----
-
-### 📊 Ingénieur 4 — UI Admin + Lot 2 (Casernes, Score)
-
-**Responsabilités :**
-- Interface d'administration : CRUD casernes (form modal ou panneau)
-- CRUD véhicules : bouton ajouter/supprimer/modifier
-- Affectation manuelle : drag-drop ou sélecteur à cliquer (avant Lot 3)
-- ScoreService + ScoreController : lire le score simulateur, l'exposer
-- Intégration UserService/TeamService (gestion pompiers)
-- FacilityService complet : synchronisation cache ↔ simulateur
-
-**Délai :** ~9h (UI casernes 2h, UI véhicules 2h, affectation manuelle 1h, score 1h, sync cache 2h, tests 1h)
-
----
-
-## 🚀 Timeline proposée (28h)
-
-| Semaine | Jour | Ing.1 | Ing.2 | Ing.3 | Ing.4 |
-|---------|------|-------|-------|-------|-------|
-| **Sem 1** | Lun–Mar | Setup Maven + Clients (4h) | Leaflet map (3h) | VehicleMovementThread (2h) | UI casernes (2h) |
-| | Mer–Jeu | Services + Controllers (4h) | Polling feux (3h) | Stratégies greedy (3h) | UI véhicules (2h) |
-| | Ven | Tests + buffer (2h) | Filtres (2h) | OSRM (2h) | Affectation manuelle (1h) |
-| **Sem 2** | Lun–Mar | Deploy + doc (2h) | Polish frontend (2h) | Tuning déplacement (2h) | Score + sync (2h) |
-| | Mer | Slack buffer pour bugs (4h d'équipe) | | | |
-| | Jeu–Ven | Démo + soutenance | | | |
-
----
-
-## 🔑 Checklist du démarrage
-
-- [ ] Créer dépôt Git, token GitLab pour la lib simulateur
-- [ ] Chacun : `mvn clean install && mvn spring-boot:run` → `http://localhost:8080` doit répondre
-- [ ] Ing.1 : WorkSessionService.init() doit faire login() et afficher le token
-- [ ] Ing.2 : Leaflet doit charger, centré sur Lyon, sans erreur CORS
-- [ ] Ing.3 : VehicleMovementThread compile et s'exécute en @Async
-- [ ] Ing.4 : Un endpoint `/api/score` doit répondre avec un objet JSON
-
----
-
-## 📝 Notes d'implémentation
-
-**Secrets statiques** : pas de `.gitignore` pour les credentials en dev, mais en prod → env vars `SIMULATOR_USERNAME`, `SIMULATOR_PASSWORD`.
-
-**Polling** : `@Scheduled(fixedDelayString = "${poller.interval-ms:3000}")` → chaque 3s, EventPollerThread appelle `FireClient.getAllFires()` et cache le résultat. Les Controllers lisent le cache, pas le simulateur.
-
-**JWT** : `JwtAuthClient.login()` au démarrage (@PostConstruct), stocke le token, tous les clients l'injectent via `getBearerHeader()`.
-
-**Cache état** : `ConcurrentHashMap<String, VehicleStateCache>` local → sera Redis au Lot 4 (microservices). Pour l'instant, c'est in-memory.
-
-**Affectation** : `@Qualifier("greedyStrategy")` dans `EmergencyManagerService`. Bascule vers `"optimizedStrategy"` pour Lot 3.3 sans modifier le service.
-
----
-
-## 🎬 Avant la soutenance (29 mai)
-
-- ✅ Démo live : affichage feux → dispatch automatique → véhicule se déplace → score augmente
-- ✅ Tous les logs sans erreur → `mvn clean test`
-- ✅ Interface admin : créer une caserne, ajouter un véhicule, le voir sur la carte
-- ✅ Score affiché en temps réel sur un tableau de bord
-
----
-
-## 📚 Ressources
-
-- Swagger API : `http://localhost:8080/swagger-ui.html` (une fois configuré)
-- Simulateur test : `http://tp.cpe.fr:8083/swagger-ui/index.html`
+- Simulateur swagger : `http://tp.cpe.fr:8083/swagger-ui/index.html`
 - Lib externe (DTOs/Enums) : `https://gitlab.com/js-project-gis-1/js-fire-simulator-public`
 - Leaflet docs : `https://leafletjs.com/`
-- Mapbox (routage) : `https://docs.mapbox.com/api/navigation/directions/`
-
-
 
 ---
+
+# FAIT
+
+### Dispatch & scoring
+
+- **Scoring normalisé [0,1]** — `vehicleScore` calcule une somme pondérée de 5 composantes (toutes ∈ [0,1]) : `vehicleNorm` (efficacité × ratio crew / MAX_EFFICIENCY), `liquidScore` (efficacité liquide sur le type de feu), `distanceScore` (hyperbole `1/(1+d/dRef)`, `dRef≈2km`), `liquidRatio`, `fuelRatio` ; poids configurables dans `application.properties`
+- **Stratégie 2 seuils** — `dispatchFires` tente d'abord les véhicules avec ressources confortables (Tier 1 `best_candidates` : fuel ≥ `readyFuel`, liquid ≥ `readyLiquid`, crew ≥ `readyCrew`) ; si aucun, fallback sur les seuils minimaux (Tier 2 `candidates`) pour ne pas laisser le feu s'étendre ; en dessous du minimum ou liquide incompatible : jamais dispatchés
+- **Tri des feux** — ordre de priorité : (0) feux non couverts par une autre équipe, (1) feux avec peu de véhicules compatibles (ressource rare), (2) intensité décroissante, (3) à égalité, feu dont le meilleur `vehicleScore` disponible est le plus élevé (évite qu'un feu lointain vole le véhicule d'un feu proche)
+- **Abandon feux faibles** — feux avec intensité ≤ `abandonIntensity + 2` ignorés (laissés aux autres équipes) ; marge +2 pour ne pas reboucler sur un feu quasi-éteint ; seuil à 0 pour les feux sur caserne
+- **Vérification carburant aller-retour** — `GisTools.hasFuelToReach(vehicle, fireLon, fireLat, facilityLon, facilityLat)` vérifie que le véhicule peut rejoindre le feu ET revenir à la caserne avant de le dispatcher (`candidates()` dans `FireService` et `RPEventService`)
+- **Détection extinction par autre équipe** — `lastKnownIntensity` (map id→intensité du tick précédent) dans `FireService` ; si intensité d'un feu non-assigné baisse → ajouté dans `beingExtinguishedByOthers` → déprioritisé dans le tri (critère 0) mais pas ignoré ; exception : candidat à moins de `dispatch.nearby-waypoints` pas du feu → non déprioritisé (déjà presque sur place)
+- **Filtre compatibilité liquide** — `isLiquidCompatible(liquidType, fireType)` exclut tout véhicule dont le liquide a < 10% d'efficacité contre ce type de feu
+
+### Déplacement
+
+- **Vitesse max par type** — `computeStepDelay` calcule le délai entre chaque pas proportionnellement à `VehicleType.getMaxSpeed()` (référence 110 km/h) ; un CAR (150 km/h) avance plus vite, un PUMPER_TRUCK (70 km/h) plus lentement
+- **Routage OSRM avec fallback** — mode `road` : requête OSRM, parse géométrie, déplacement segment par segment ; 3 cas de fallback en ligne droite (HTTP error, code invalide, pas de coordonnées) ; tronçon final hors-réseau routier toujours parcouru en ligne droite
+- **Feu éteint en route** — `moveToPoint` vérifie périodiquement (toutes les `fireCheckDelayMs`) si le feu cible est quasi-éteint ; si oui, lève `FireGoneException` → `redirectAfterFireGone` libère le feu, cherche un autre via `findNextFireForVehicle` et repart directement ; si aucun disponible, retour caserne
+
+### Gestion caserne & recharge
+
+- **Support multi-casernes** — `knownFacilities` (lazy load) dans `FireService` ; `caserneOnFire()` détecte un feu sur n'importe laquelle de nos casernes ; `handleCasernefire()` rappelle le véhicule le plus compatible + le plus proche de LA caserne concernée
+- **Protection caserne priorité absolue** — feux sur caserne traités avant tout autre feu ; Tier 0a : véhicule libre → dispatch immédiat ; Tier 0b : tous en mission → rappel forcé du plus compatible (cooldown 30s pour éviter les rappels répétés)
+- **Recharge conditionnelle** — `vehicleNeedsRecharge` vérifie fuel < `minFuelForNewMission` ou liquid < `minLiquidForNewMission` ; `waitForRecharge(waitForFull=false)` attend les seuils `readyFuel`/`readyLiquid` (dispatch rapide), `waitForFull=true` attend 100% (avant repositionnement)
+- **Retour à la caserne la plus proche** — après mission normale, `nearestFacility()` interroge toutes nos casernes et sélectionne la plus proche par distance euclidienne ; `returnToFacility` et `waitForRecharge` acceptent une `FacilityDto` cible optionnelle ; rappel forcé (feu sur caserne, bouton recall) → caserne d'origine conservée (`null`)
+- **Rappel global** — `recall-all` rapatrie aussi les véhicules inactifs via `recallIdleVehicle()` ; s'annule proprement si le rappel est désactivé en cours de route (`ResumeMissionException`)
+
+### Repositionnement & chaînage de missions
+
+- **Repositionnement au centroïde** — quand un véhicule est inactif et chargé, `repositionIdleVehicles()` le détecte, le marque dans `repositioningVehicles` et lance `recallIdleVehicle()` (caserne → recharge 100% → centroïde des feux actifs) ; annulable à chaque pas si un dispatch arrive (`RepositioningCancelledException`)
+- **Chaînage direct feu→feu et event→event** — après extinction/résolution, si ressources suffisantes, `findNextFireForVehicle` / `findNextEventForVehicle` est appelé ; si candidat trouvé, `claimFire` / `claimEvent` transfère l'assignation atomiquement et le véhicule repart sans passer par la caserne ; sinon `willReposition` décide du niveau de recharge
+
+### Events (accidents / blessés)
+
+- **Dispatch events** — `RPEventService.dispatchEvents()` score et affecte les véhicules aux `road_accident` et `personal_injury` ; `moveVehicleToEvent()` gère le déplacement, l'attente de résolution, la redirection si l'event est résolu en route (`redirectAfterEventGone`) et le retour caserne si ressources insuffisantes
+
+### Robustesse & corrections
+
+- **Bug concurrence `recallIdleVehicle`** — si un dispatch arrive pendant le retour/recharge/repositionnement, `returnToFacility` utilise la phase `TO_REPOSITION` (interruptible) ; `waitForRecharge` lève `RepositioningCancelledException` si le véhicule est dispatché ; `recallIdleVehicle` sort immédiatement via le `finally`
+- **Position de départ stale** — au lancement du thread async, refetch `vehicleClient.getVehicleById` en tout début de `moveVehicle` et `moveVehicleToEvent` pour partir de la vraie position courante (pas la position potentiellement obsolète du poller)
+- **Logs non répétitifs** — `waitForFireOut`, `waitForEventOut`, `waitForRecharge` ne loggent que lors d'un changement de valeur (variable locale `lastIntensity`/`lastFuel`/`lastLiquid`) ; feux non couverts loggés uniquement lors du changement d'état (`uncoveredFireIds`)
+- **Pool de threads** — taille `vehicleMovementExecutor` ajustée dans `AppConfig` pour éviter les blocages lors des dispatches simultanés
+- **Frontend** — rafraîchissement automatique toutes les 3s ; interface véhicules (`vehicles.html` + `vehicles.js`) refactorisée
+
 ---
 
-# FAIT :
-- Implémenter Auth + JWT + session !!! --> Non car pour les profs
-- Finir les clients --> fait
-- Finir les controllers --> fait
-- Finir les services --> fait
-- **FAIT** : `isLiquidCompatible(liquidType, fireType)` filtre les véhicules incompatibles via la matrice d'efficacité de `LiquidType` ; `vehicleScore` intègre l'efficiency (×50) en plus de l'équipage (×10) et des ressources.
-- **FAIT** : stratégie à deux seuils dans `EmergencyManagerService.dispatchAll` :
-    - **Tier 1** (`best_candidates`) : fuel ≥ `dispatch.ready.fuel` ET liquid ≥ `dispatch.ready.liquid` ET compatible → meilleur score
-    - **Tier 2** (`candidates`) : fallback si aucun véhicule "prêt" (seuils minimaux `dispatch.min.*`) pour ne pas laisser le feu s'étendre
-    - Véhicules sous le seuil minimum ou liquide incompatible : jamais dispatchés
-    - Seuils configurables dans `application.properties`
-- **FAIT** : vitesse max prise en compte pour le déplacement — `computeStepDelay` calcule le délai entre chaque pas proportionnellement à `VehicleType.getMaxSpeed()` (référence 110 km/h)
-- **FAIT** : véhicule rentre/recharge à la caserne uniquement si nécessaire — `vehicleNeedsRecharge` vérifie fuel < minFuel ou liquid < minLiquid ; `waitForRecharge` attend les seuils `readyFuel`/`readyLiquid` avant de libérer le véhicule
-- **FAIT** : retour à la caserne la plus proche après mission — `nearestFacility()` dans `VehicleMovementThread` interroge toutes nos casernes et sélectionne la plus proche ; `returnToFacility` et `waitForRecharge` acceptent désormais une `FacilityDto` cible optionnelle ; rappel forcé (feu sur caserne, bouton recall) → caserne d’origine conservée (`null`)
-- **FAIT** : si le véhicule n'arrive pas au feu par la route (feu en zone inaccessible…), fallback automatique en ligne droite — les 3 cas d'échec OSRM (HTTP error, code invalide, pas de coordonnées) tombent sur `moveToPoint` ; le tronçon final hors-route est aussi parcouru en ligne droite
-- **FAIT** : support multi-casernes dans `FireService` — `knownFacilities` remplace les scalaires `caserneLon`/`caserneLat` ; `ensureFacilityList()` charge toutes les casernes ; `caserneOnFire()` détecte un feu sur n'importe laquelle ; `handleCasernefire()` rappelle le véhicule le plus proche de LA caserne concernée (et non d'une caserne unique hardcodée)
-- **FAIT** : rappel global (`recall-all`) rapatrie aussi les véhicules inactifs — `recallIdleVehicle()` dans `VehicleMovementThread` envoie chaque véhicule sans thread actif vers sa caserne (`facilityRefID`) ; s'annule proprement si le rappel est désactivé en cours de route
-- **FAIT** : faire en sorte que les vehicules captent si le feu sur lequel il est dispatché a été eteint entre temps sur la route (par d'autres equipes) → demi-tour vers un autre feu si possible via `FireGoneException` + `redirectAfterFireGone`
-- **FAIT** : distance prise en compte dans le score via `distanceWeight` (×300) dans `vehicleScore` — un véhicule proche est favorisé, ce qui couvre implicitement les waypoints OSRM (plus de waypoints = plus de distance = score plus bas)
-- **FAIT** : dispatch pour les events (`road_accident` & `personal_injury`) — `RPEventService.dispatchEvents()` score et affecte les véhicules aux événements ; `moveVehicleToEvent()` gère le déplacement, l'attente de résolution, la redirection si l'event est résolu en route (`redirectAfterEventGone`) et le retour caserne si ressources insuffisantes
-- Pour le moment, quand un véhicule a éteint un feu et qu'aucun autre feu ne lui correspond, il est en **retour libre** et rentre à la caserne → à changer ?
-- **FAIT** : stratégie abandon feux faibles — `dispatchFires` filtre les feux avec `intensité ≤ abandonIntensity + 2` (marge de +2 pour éviter de retourner en boucle sur un feu quasi-éteint) ; les feux sur caserne ignorent ce seuil (`threshold = 0`)
-- **FAIT** : vérification carburant aller-retour avant dispatch — `GisTools.hasFuelToReach(vehicle, fireLon, fireLat, facilityLon, facilityLat)` calcule si le véhicule a assez de carburant pour aller au feu ET revenir à la caserne ; utilisé dans `candidates()` de `FireService` et dans `RPEventService`
-- **FAIT** : logs non répétitifs — `waitForFireOut` et `waitForEventOut` ne loggent l'intensité que lorsqu'elle change (variable locale `lastIntensity: float`) ; `waitForRecharge` idem pour fuel/liquid ; nombre de blessés restants centralisé dans `EventPollerThread` via `lastEventRemaining` (même pattern que `lastFireCount`)
-- **FAIT** : frontend rafraîchissement automatique toutes les 3 s avec interface véhicules améliorée (vehicles.html + vehicles.js refactorisés)
-- **FAIT** : pool de threads corrigé dans `AppConfig` — nombre de threads `vehicleMovementExecutor` ajusté pour éviter les blocages lors des dispatches simultanés
-- **FAIT** : détection feux en cours d’extinction par une autre équipe — `lastKnownIntensity` (map id→intensité du tick précédent) dans `FireService` ; si l’intensité d’un feu non-assigné baisse entre deux ticks → ajout dans `beingExtinguishedByOthers` → critère de tri 0 dans `dispatchFires` (déprioritisé mais pas ignoré) ; **exception** : si un candidat est à moins de `dispatch.nearby-waypoints` (défaut 100) pas du feu, il n’est pas déprioritisé (inutile de l’éviter s’il est déjà presque sur place) ; map nettoyée des feux disparus à chaque tick
-- **FAIT** : correction dispatch greedy — le tri des feux ajoute un critère 3 : à égalité d’intensité, le feu dont le meilleur vehicleScore disponible est le plus élevé passe en premier (évite qu’un feu lointain mais intense vole le véhicule d’un feu proche de même priorité)
-- **FAIT** : repositionnement automatique au centroïde des feux actifs quand un véhicule est inactif et chargé à 100% :
-    - `MovePhase.TO_REPOSITION` + `RepositioningCancelledException` dans `VehicleMovementThread` — le thread de repositionnement s’annule immédiatement à son prochain pas si un dispatch arrive
-    - `repositioningVehicles` (ConcurrentHashMap.newKeySet) dans `EmergencyManagerService` — garde les véhicules en cours de repositionnement sans les masquer au dispatch (ils restent candidats)
-    - `repositionToCentroid()` calcule la moyenne lon/lat des feux actifs et lance `repositionVehicle()` async
-    - `waitForRecharge(boolean waitForFull)` — `true` attend 100% de capacité (avant repositionnement), `false` attend les seuils `readyFuel`/`readyLiquid` (dispatch rapide)
-    - `willReposition` flag dans `moveVehicle()` et `moveVehicleToEvent()` : mis à `true` si `next.isEmpty()` et des feux actifs existent → charge à 100% puis repositionne, sinon charge aux seuils ready
-    - `repositionIdleVehicles()` dans `EmergencyManagerService` appelée à chaque tick de dispatch : détecte les véhicules inactifs (hors `vehicleStates` et `repositioningVehicles`), les marque atomiquement via `repositioningVehicles.add()` et lance `recallIdleVehicle()` (caserne → recharge 100% → centroïde)
-- **FAIT** : chaînage direct feu→feu et event→event sans repasser par la caserne — après extinction/résolution, si les ressources sont suffisantes, `findNextFireForVehicle` / `findNextEventForVehicle` est appelé ; si un candidat existe, `claimFire` / `claimEvent` transfère l’assignation atomiquement et le véhicule repart directement ; si aucun candidat, `willReposition` décide si on charge à 100% pour se repositionner ou aux seuils ready pour rester disponible
-- **FAIT** : correction bug de concurrence — quand un dispatch arrive pendant qu’un véhicule est dans `recallIdleVehicle` (retour caserne + recharge + repositionnement), l’ancien thread s’arrête proprement : `returnToFacility` utilise la phase `TO_REPOSITION` (interruptible) au lieu de `TO_FACILITY` ; `waitForRecharge` capture `wasRepositioning` au démarrage et lève `RepositioningCancelledException` dans ses boucles de polling si le véhicule est dispatché ; `recallIdleVehicle` attrape l’exception et sort immédiatement via le `finally`
-- **FAIT** : correction position de départ stale dans `moveVehicle` et `moveVehicleToEvent` — au lancement du thread async, le `VehicleDto` du poller peut avoir une position obsolète (véhicule vient de rentrer à la caserne mais le poller n’a pas encore rafraîchi) ; ajout d’un refetch `vehicleClient.getVehicleById` en tout début de méthode pour que la première route OSRM parte de la vraie position courante
+# @TODO
 
-# @TODO :
-- FRONT : Une interface simple permettant d’afficher / masquer les feux selon leur type, leur intensité, leur étendue, leur nombre de blessés, etc.
-- FRONT : Une interface simple permettant d’afficher / masquer les véhicules selon leur type, le type de liquide, leur niveau de carburant, etc.
-
-- Faire les 3 configs (il en manque 1 : SecurityConfig.java)
-- FacilityStatecache + VehicleStateCache + MissionState ??? Et donc dans les services, mettre à jour le cache à chaque appel au simulateur
-- Changement de liquide automatiquement à la caserne si un véhicule n’a pas de feu de son type de liquide à eteindre, pour éviter qu’il attente à la caserne alors qu’il pourrait être utile sur un feu d’un autre type (ex : un véhicule à eau qui attend alors qu’il pourrait aller éteindre un feu de type électrique en changeant de liquide à la caserne)
-- Prendre en compte la distance et la conso par km pour chaque véhicule pour savoir quand on doit rentrer à la caserne en fonction de la distance et du fuel. Pour savoir s’il doit faire le plein avant de partir ou pas
-- Seuils d’abandon de mission, de recharge, de dispatch à revoir en terme de RATIO (pour que chaque vehicule soit adapaté)
-- ACTUELLEMENT si toutes les ambulances sont occupées, un fire engine peut aller sur un road accident — c’est sous-optimal si un feu électrique spawn dans la foulée (donc pourquoi pas pour pas qu'il fasse rien MAIS il faudrait lever une exception dans ce cas pour forcer le fire engine à abandonner l’accident et aller sur le feu électrique dès que ce dernier spawn)
-- Les accidents sont vraiment bien gérés ?
-- Revoir repartition des vehicules ???
-
--  OPTIONNEL : La gestion de la fatigue : on peut envisager qu’un pompier doive rester inactif pendant un certain temps avant de pouvoir repartir en mission ;
+- FRONT : filtres feux (type, intensité, étendue, blessés) et filtres véhicules (type, liquide, carburant)
+- Seuils d'abandon, de recharge et de dispatch à revoir en ratio (pour adapter chaque type de véhicule)
+- OPTIONNEL : gestion de la fatigue (pompier doit rester inactif un certain temps avant de repartir)

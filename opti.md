@@ -2,15 +2,15 @@
 
 ## 1. Variables de décision
 
-| Variable | Véhicule | Places | Crew | Vitesse | Eff. feu | Eff. event (moy) |
-|---|---|---|---|---|---|---|
-| x₁ | CAR | 2 | 2 | 150 km/h | 1 | (1+5+5)/3 = 3.67 |
-| x₂ | FIRE_ENGINE | 4 | 4 | 110 km/h | 5 | (2+1+2)/3 = 1.67 |
-| x₃ | PUMPER_TRUCK | 10 | 6 | 70 km/h | 20 | (2+1+2)/3 = 1.67 |
-| x₄ | WATER_TENDERS | 10 | 3 | 110 km/h | 20 | 0 |
-| x₅ | TURNTABLE | 15 | 6 | 70 km/h | 40 | (0+0+5)/3 = 1.67 |
-| x₆ | TRUCK | 20 | 8 | 110 km/h | 50 | (2+2+2)/3 = 2 |
-| x₇ | AMBULANCE | 4 | 2 | 110 km/h | 0 | (20+20+20)/3 = 20 |
+| Variable   | Véhicule      | Places | Crew | Vitesse   | Eff. feu | Eff. event (moy)   |
+|------------|---------------|--------|------|-----------|----------|--------------------|
+| x₁         | CAR           | 2      | 2    | 150 km/h  | 1        | (1+5+5)/3 = 3.67   |
+| x₂         | FIRE_ENGINE   | 4      | 4    | 110 km/h  | 5        | (2+1+2)/3 = 1.67   |
+| x₃         | PUMPER_TRUCK  | 10     | 6    | 70 km/h   | 20       | (2+1+2)/3 = 1.67   |
+| x₄         | WATER_TENDERS | 10     | 3    | 110 km/h  | 20       | 0                  |
+| x₅         | TURNTABLE     | 15     | 6    | 70 km/h   | 40       | (0+0+5)/3 = 1.67   |
+| x₆         | TRUCK         | 20     | 8    | 110 km/h  | 50       | (2+2+2)/3 = 2      |
+| x₇         | AMBULANCE     | 4      | 2    | 110 km/h  | 0        | (20+20+20)/3 = 20  |
 
 ---
 

@@ -74,11 +74,11 @@ public class RPEventService {
         return facilities.stream().filter(f -> f.getId().equals(v.getFacilityRefID())).findFirst();
     }
 
-    // ── Vérifie si le véhicule est efficace sur ce type d'event (supérieur à 0 -> donc même un Fire engine va etre efficace à 20% sur un road event !!!) ───────────────────────────────────────────────
+    // Seuil > 2f : exclut les fire engines (ROAD=2f, INJURY=1f) et n'autorise que EMERGENCY_AMBULANCE (20f) et CAR (INJURY/MISC=5f)
     private boolean isCompatibleWithEvent(VehicleDto v, EmergencyEventDto event) {
         if (v.getType() == null || event.getEventType() == null) return false;
         return v.getType().getEfficiencyMap()
-                .getOrDefault(event.getEventType(), 0f) > 2f; //
+                .getOrDefault(event.getEventType(), 0f) > 2f;
     }
 
     // ── Score d'aptitude pour un event ────────────────────────────────────────

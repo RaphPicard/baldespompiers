@@ -54,7 +54,7 @@ body { margin: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-
   transition: all 0.15s ease;
   user-select: none;
 }
-.filter-btn:first-of-type { margin-top: 0; }
+/*.filter-btn:first-of-type { margin-top: 0; }*/
 .filter-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
 
 .filter-group { display: contents; }

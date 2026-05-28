@@ -13,6 +13,11 @@ const FUEL_CAPACITY_BY_TYPE = {
   CAR: 50, FIRE_ENGINE: 60, PUMPER_TRUCK: 500, WATER_TENDERS: 500,
   TURNTABLE_LADDER_TRUCK: 500, TRUCK: 500, EMERGENCY_AMBULANCE: 60,
 };
+// vehicleCrewCapacity côté Java (2e arg du constructeur VehicleType)
+const CREW_CAPACITY_BY_TYPE = {
+  CAR: 2, FIRE_ENGINE: 4, PUMPER_TRUCK: 6, WATER_TENDERS: 3,
+  TURNTABLE_LADDER_TRUCK: 6, TRUCK: 8, EMERGENCY_AMBULANCE: 2,
+};
 const VEHICLE_ICON = {
   CAR: '🚓', FIRE_ENGINE: '🚒', PUMPER_TRUCK: '🚛', WATER_TENDERS: '🚛',
   TURNTABLE_LADDER_TRUCK: '🪜', TRUCK: '🚚', EMERGENCY_AMBULANCE: '🚑',
@@ -379,9 +384,29 @@ async function recallAllVehicles() {
 
 const REFRESH_INTERVAL_MS = 3000;
 
+// Synchronise les hints (place + équipage) et l'input équipage avec le type sélectionné
+function syncCrewMaxFromType() {
+  const typeSel = document.getElementById('type');
+  const input = document.getElementById('crewMember');
+  const crewHint = document.getElementById('crew-max-hint');
+  const spaceHint = document.getElementById('space-hint');
+  if (!typeSel || !input) return;
+  const max = CREW_CAPACITY_BY_TYPE[typeSel.value] ?? 0;
+  const space = VEHICLE_SPACE_BY_TYPE[typeSel.value] ?? 0;
+  input.max = max;
+  input.value = max;
+  if (crewHint) crewHint.textContent = `max : ${max}`;
+  if (spaceHint) spaceHint.textContent = `${space} places`;
+}
+
 (async () => {
   await loadFacilities();
   await loadVehicles();
+  const typeSel = document.getElementById('type');
+  if (typeSel) {
+    typeSel.addEventListener('change', syncCrewMaxFromType);
+    syncCrewMaxFromType(); // initial
+  }
   setInterval(() => {
     // Pas de refresh pendant l'édition pour ne pas écraser les inputs
     if (editingVehicleId != null) return;

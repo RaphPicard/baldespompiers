@@ -132,10 +132,4 @@ baldespompiers/
 - **Pool de threads** — taille `vehicleMovementExecutor` ajustée dans `AppConfig` pour éviter les blocages lors des dispatches simultanés
 - **Frontend** — rafraîchissement automatique toutes les 3s ; interface véhicules (`vehicles.html` + `vehicles.js`) refactorisée
 
----
 
-# @TODO
-
-- FRONT : filtres feux (type, intensité, étendue, blessés) et filtres véhicules (type, liquide, carburant)
-- Seuils d'abandon, de recharge et de dispatch à revoir en ratio (pour adapter chaque type de véhicule)
-- OPTIONNEL : gestion de la fatigue (pompier doit rester inactif un certain temps avant de repartir)
